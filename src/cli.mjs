@@ -102,6 +102,9 @@ const COMMANDS = {
     process.exit(0);
   },
   "install-pi": installPi,
+  paths: pathsCommand,
+  migrate: migrateCommand,
+  init: initCommand,
   config: configCommand,
   "orca-layout": orcaLayoutCommand,
   update: updateCommand,
@@ -298,6 +301,35 @@ async function orcaLayoutCommand() {
   // Without public_url the hub link is this machine's loopback: wrong on the helper's machine.
   if (!cfg.publicUrls.some((u) => !/\/\/(127\.0\.0\.1|localhost)[:/]?/.test(u))) console.error("aviso: config.yaml no tiene public_url; el layout apunta a 127.0.0.1, que solo sirve si el helper corre en esta misma máquina");
   console.log(JSON.stringify(orcaLayout(cfg), null, 2));
+  process.exit(0);
+}
+
+async function pathsCommand() {
+  const { describePaths } = await import("./init.mjs");
+  const p = describePaths();
+  if (opt.json) console.log(JSON.stringify(p, null, 2));
+  else for (const [k, v] of Object.entries(p)) console.log(`${k.padEnd(8)} ${v}`);
+  process.exit(0);
+}
+
+// Never with the hub running: it has the database open.
+async function migrateCommand() {
+  const { migrateHome, planMigration } = await import("./migrate.mjs");
+  const { hubAnswers, configPort } = await import("./init.mjs");
+  const plan = planMigration();
+  const port = plan.status === "migrate" && configPort(plan.configFile);
+  if (port && !opt["dry-run"] && !opt.force && (await hubAnswers(port))) {
+    fail(`El hub está corriendo (puerto ${port}). Usa ${PROG} service install, que lo para, migra y lo vuelve a arrancar; o detenlo y corre ${PROG} migrate (--force para migrar igual).`);
+  }
+  const res = migrateHome({ dryRun: opt["dry-run"], log: (m) => console.log(m) });
+  if (res.status === "nothing") console.log(`Nada que migrar: todo está en ${res.home}.`);
+  else if (res.status === "migrate" && !opt["dry-run"]) console.log(`Listo: todo en ${res.home} (respaldo en ${res.backup}).`);
+  process.exit(["ambiguous", "conflict"].includes(res.status) ? 1 : 0);
+}
+
+async function initCommand() {
+  const { init } = await import("./init.mjs");
+  init({ log: (m) => console.log(m) });
   process.exit(0);
 }
 

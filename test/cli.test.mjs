@@ -92,7 +92,7 @@ test("install-hooks --repoint fixes hooks whose script no longer exists", () => 
   assert.ok(fs.readdirSync(dir).some((f) => f.startsWith("settings.json.bak-overhaul-")));
 });
 
-test("helper layout: OVERHAUL_LAYOUT, else ~/.config/overhaul, origins default to the hub", async () => {
+test("helper layout: OVERHAUL_LAYOUT, else ~/.overhaul, else ~/.config/overhaul, origins default to the hub", async () => {
   const { layoutFile } = await import("../helper/orca.mjs");
   const home = tmp("overhaul-layout-");
   assert.equal(layoutFile({ OVERHAUL_LAYOUT: "/x.json" }, home), "/x.json");
@@ -101,6 +101,11 @@ test("helper layout: OVERHAUL_LAYOUT, else ~/.config/overhaul, origins default t
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, "{}");
   assert.equal(layoutFile({}, home), f);
+  const g = path.join(home, ".overhaul/orca-layout.json");
+  fs.mkdirSync(path.dirname(g), { recursive: true });
+  fs.writeFileSync(g, "{}");
+  assert.equal(layoutFile({}, home), g);
+  assert.equal(layoutFile({ OVERHAUL_HOME: path.join(home, "x") }, home), f);
   for (const name of ["orca-layout.example.json"]) {
     const l = JSON.parse(fs.readFileSync(path.join(root, "helper", name), "utf8"));
     assert.ok(l.hub && l.agentsDir && Array.isArray(l.projects));

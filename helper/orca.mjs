@@ -15,11 +15,13 @@ const ATTACH = path.join(HERE, "attach.mjs");
 
 const expandHome = (p) => (p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p);
 // The layout lives outside the repo, on this machine: OVERHAUL_LAYOUT, else
-// ~/.config/overhaul/orca-layout.json (generate it on the hub host with `overhaul orca-layout`).
-// helper/orca-layout.json, from before it moved out, is still read when it is the only one.
+// ~/.overhaul/orca-layout.json (OVERHAUL_HOME), else v0.1's ~/.config/overhaul/orca-layout.json
+// (generate it on the hub host with `overhaul orca-layout`). helper/orca-layout.json, from before
+// it moved out, is still read when it is the only one.
 export function layoutFile(env = process.env, home = os.homedir()) {
   if (env.OVERHAUL_LAYOUT) return env.OVERHAUL_LAYOUT;
-  const files = [path.join(home, ".config/overhaul/orca-layout.json"), path.join(HERE, "orca-layout.json")];
+  const ohHome = env.OVERHAUL_HOME || path.join(home, ".overhaul");
+  const files = [path.join(ohHome, "orca-layout.json"), path.join(home, ".config/overhaul/orca-layout.json"), path.join(HERE, "orca-layout.json")];
   const found = files.find((f) => fs.existsSync(f));
   if (!found) throw new Error(`Sin layout de Orca: crea ${files[0]} con \`overhaul orca-layout\` en el host del hub`);
   return found;

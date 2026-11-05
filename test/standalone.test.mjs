@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { normalize } from "../src/config.mjs";
 import { hubUrls, localHost } from "../src/env.mjs";
-import { standaloneConfig } from "../deploy/standalone/config.mjs";
+import { standaloneConfig } from "../src/init.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -58,7 +58,7 @@ test("standalone config: loopback, no helper, no projects, given time zone", () 
   assert.equal(cfg.timezone, "Europe/Madrid");
   assert.equal(cfg.port, 7420);
   assert.deepEqual(cfg.projects, []);
-  assert.equal(YAML.parse(text).data_dir, "~/.local/share/overhaul"); // written out: never switches folders later
+  assert.equal(YAML.parse(text).data_dir, undefined); // the data stays in ~/.overhaul (OVERHAUL_HOME)
   assert.doesNotMatch(text, /^\s*host:/m);
   assert.doesNotMatch(text, /\b100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d/);
 });
