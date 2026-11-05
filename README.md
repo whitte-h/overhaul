@@ -28,6 +28,15 @@ Overhaul completo en una máquina, Linux o macOS (arm64 o x64): tablero, pregunt
 
    El instalador elige cómo bajar en este orden: `gh` con sesión; si no hay, `GH_TOKEN` o `GITHUB_TOKEN` con la API de GitHub (un token con lectura de contenidos del repo; nunca va en la línea de comandos de `curl`); si no, las URLs públicas. Si un camino falla (por ejemplo, `gh` de una cuenta sin acceso), prueba el siguiente.
 
+   Con Homebrew (macOS o Linux), cuando exista el tap `whitte-h/homebrew-tap`:
+
+   ```bash
+   brew install whitte-h/tap/overhaul
+   overhaul init && overhaul set-password && overhaul service install
+   ```
+
+   La fórmula está en [packaging/homebrew/overhaul.rb](packaging/homebrew/overhaul.rb) y cada release adjunta la suya (`overhaul.rb`). `brew services start overhaul` corre solo el hub; `overhaul service install` corre hub y puente (usa uno de los dos).
+
 3. El instalador:
    - crea `~/.overhaul/config.yaml` (config v2, sin proyectos, solo `127.0.0.1`, sin helper, tu zona horaria) y `env` (permisos 600, con `HUB_AGENT_TOKEN` aleatorio), solo si no existen (`overhaul init`);
    - te pide la contraseña del hub (`overhaul set-password`);

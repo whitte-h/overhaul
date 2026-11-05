@@ -3,6 +3,7 @@
 # publishes the GitHub Release (docs/contract.md, "Release"):
 #   overhaul-<os>-<arch> + .sha256 for darwin-arm64, darwin-x64, linux-arm64, linux-x64
 #   install.sh (one-line install), overhaul-vX.Y.Z.tar.gz + .sha256 (what v0.1's `overhaul update` downloads)
+#   overhaul.rb (Homebrew formula for this release; committed to the tap only when HOMEBREW_TAP_TOKEN is set)
 name: release
 
 on:
@@ -83,6 +84,8 @@ jobs:
         run: cd dist && sha256sum -c overhaul-*.sha256
       - name: Build the tarball
         run: node scripts/release.mjs --tag "$GITHUB_REF_NAME" --out dist
+      - name: Homebrew formula for this release
+        run: node scripts/homebrew.mjs --version "${GITHUB_REF_NAME#v}" --dist dist --out dist/overhaul.rb
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -94,5 +97,32 @@ jobs:
             dist/overhaul-linux-x64 dist/overhaul-linux-x64.sha256 \
             "dist/overhaul-$GITHUB_REF_NAME.tar.gz" \
             "dist/overhaul-$GITHUB_REF_NAME.tar.gz.sha256" \
-            install.sh \
+            install.sh dist/overhaul.rb \
             --title "Overhaul $GITHUB_REF_NAME" --generate-notes --verify-tag
+
+  # The tap (a public repo, whitte-h/homebrew-tap) is not created by this workflow. Once it exists,
+  # a HOMEBREW_TAP_TOKEN secret with write access to it turns this job on.
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      TAP_REPO: whitte-h/homebrew-tap
+    steps:
+      - name: Formula from the release
+        if: env.TAP_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern overhaul.rb --dir .
+      - name: Commit it to the tap
+        if: env.TAP_TOKEN != ''
+        run: |
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+          cp overhaul.rb tap/Formula/overhaul.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/overhaul.rb
+          git diff --cached --quiet || git commit -m "overhaul ${GITHUB_REF_NAME}"
+          git push
