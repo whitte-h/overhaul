@@ -1,0 +1,9 @@
+{
+  "_comment": "Orca layout for the desktop helper. Lives at ~/.config/overhaul/orca-layout.json on the machine that runs Orca (or OVERHAUL_LAYOUT). Generate it on the hub host with `overhaul orca-layout` (from config.yaml: public_url, orca.agents_dir, each project's host and tmux session). hub: the hub link Orca opens; origins: every URL the hub page is opened from (the helper answers only those); one Orca project per hub project, an empty git folder under agentsDir.",
+  "hub": "http://my-server:7420",
+  "origins": ["http://my-server:7420"],
+  "agentsDir": "~/overhaul/orca",
+  "projects": [
+    { "id": "myproject", "host": "my-server", "session": "myproject" }
+  ]
+}

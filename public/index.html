@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1b1b1a" media="(prefers-color-scheme: dark)">
+  <title>Overhaul</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header id="topbar" class="topbar">
+    <div class="topbar-row">
+      <h1 id="title">Overhaul</h1>
+      <label class="follow" title="Al elegir un ticket, Orca muestra su terminal (necesita el helper de Overhaul)"><input id="follow-orca" type="checkbox"> Seguir en Orca</label>
+      <button id="refresh" type="button">Sincronizar</button>
+    </div>
+    <nav id="chips" class="tabs" aria-label="Proyectos"></nav>
+    <nav id="ticket-tabs" class="tabs sub" aria-label="Tickets"></nav>
+  </header>
+  <main>
+    <div id="metrics" class="metrics"></div>
+    <div id="daily-panel"></div>
+    <div id="banners"></div>
+    <div id="window-panel"></div>
+    <div id="setup"></div>
+    <div id="setup-flash" class="flash"></div>
+    <div id="tickets" class="ticket-view"></div>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

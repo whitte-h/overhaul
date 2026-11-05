@@ -1,0 +1,16 @@
+# Standalone Overhaul hub (install.sh fills __NODE__, __DIR__, __PATH__, __CONFIG_DIR__). Listens where
+# config.yaml `bind` says; install.sh's config uses 127.0.0.1 only.
+[Unit]
+Description=Overhaul hub (standalone)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=__NODE__ __DIR__/src/server.mjs
+Environment="PATH=__PATH__"
+Environment="HUB_CONFIG_DIR=__CONFIG_DIR__"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

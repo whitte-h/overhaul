@@ -1,0 +1,93 @@
+# Overhaul config v2: ~/.config/overhaul/config.yaml. Install settings on top, one block per
+# project below. Secrets never go here: *_env fields name a variable in ~/.config/overhaul/env
+# (permissions 600). Restart after editing:
+#   systemctl --user restart overhaul                          (Linux)
+#   launchctl kickstart -k gui/$(id -u)/overhaul.hub           (macOS)
+# A config without `version: 2` is read as v1 (work-hub); `overhaul config migrate` upgrades it.
+
+version: 2
+
+# --- Install --------------------------------------------------------------------------------
+port: 7420
+bind: [127.0.0.1]                  # addresses to listen on (add a LAN or VPN IP to open it up)
+# Only these sources get an answer; anything else gets 403. Default: this machine only.
+# allow_from: [127.0.0.0/8, ::1/128, 10.0.0.0/8]
+# timezone: Europe/Madrid          # for daily summaries; default: this machine's
+# data_dir: ~/.local/share/overhaul
+# Simple login: one password, read from this variable in env (bin/set-password sets it).
+# auth: { password_env: HUB_TOKEN }
+# public_url: http://my-server:7420  # the link people (and Orca) open; a list allows several
+terminal: tmux                     # default for projects: tmux windows, or orca terminals
+# Optional desktop helper (Chrome profiles, Orca terminals, port forwards). Off unless set.
+# helper: http://127.0.0.1:7421
+# orca: { agents_dir: ~/overhaul/orca }   # on the helper's machine, see `overhaul orca-layout`
+# message_tag: overhaul            # opens every message pasted into an agent: "[overhaul] …"
+
+# Applied to every project unless the project overrides it.
+defaults:
+  daily_summary: false
+  auto_work: false
+  create_tickets: false            # general agent (chat icon) may create tickets in the tracker
+
+# --- Projects -------------------------------------------------------------------------------
+projects:
+  myapp:
+    name: My App
+    repo: ~/code/myapp             # main repo; also what the daily lists commits from (repos: [...] for more)
+    # host: my-server              # where its agents run; default: this machine
+    tracker:
+      type: kanban-md              # jira | kaneo | kanban-md | none
+      dir: ~/code/myapp/kanban
+      prefix: APP
+      statuses: [todo, in-progress, review]
+    # Which agent crew runs the project and where its profile lives: external (Overhaul's
+    # config, default) or repo (AGENTS.md, .claude/agents; also when the repo has its own
+    # lane: ORCA.md or .pi/).
+    agents: { location: external }
+    runtime:
+      command: claude              # claude | pi | your own command
+      # prompt: "/skill:my-orchestrator {key}"   # opens each ticket agent's first message
+      # dir: ~/code/myapp          # where ticket agents start; default: repo
+      # terminal: orca             # default: the install's `terminal`
+      # orca_worktree: ~/code/myapp
+      orchestrator: myapp:orq      # tmux session:window that gets messages for tickets without their own window
+      # per_ticket: false          # only the orchestrator, no agent per ticket
+    create_tickets: true
+    # links: { App: http://localhost:5173 }
+    # github: { owner: my-org }    # PRs looked up by the host's bridge with its gh login
+    # chrome_profile: Default      # with the helper: links open in this Chrome profile
+
+  client:
+    name: Client
+    tracker:
+      type: jira
+      base_url: https://client.atlassian.net
+      email_env: JIRA_CLIENT_EMAIL
+      token_env: JIRA_CLIENT_TOKEN
+      jql: assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC
+      # Kaneo instead:
+      # type: kaneo
+      # base_url: https://kaneo.example.com
+      # workspace_id: <id>
+      # projects: [ ABC ]          # several hub projects share one workspace: keep only these Kaneo projects (slug or name)
+      # exclude_projects: [ ABC ]  # ...or leave some out
+      # token_env: KANEO_CLIENT_TOKEN
+      # task_url: https://kaneo.example.com/ws/task/{key}
+    runtime: { dir: ~/code/client, orchestrator: client:orq }
+    repos: [~/code/client/api, ~/code/client/web]
+    # repos_root: ~/code/client    # the hub asks about repos here without a project, and clones new ones here
+    daily_summary:
+      enabled: true
+      at: "08:30"                  # local time, see timezone
+      include: [status_changes, decisions, commits, today, blockers]
+    auto_work:
+      enabled: false
+      statuses: [In Progress]      # also what "today" lists in the daily
+      max_parallel: 1
+      plan_first: true             # agent posts its plan as a question and waits for your OK
+      initial_questions: true      # with plan_first: first it proposes the questions it needs; you refine them in the hub
+      # One board over several repos: map each tracker group to its repo.
+      # repos_by_group: { API: ~/code/client/api }
+      # worktree_root: ~/code/client/.worktrees   (default: next to repo)
+      # tmux_session: client                      (default: project id)
+      # base_ref: origin/main                     (default: HEAD of each repo)

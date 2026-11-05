@@ -1,0 +1,15 @@
+{
+  "name": "overhaul-helper",
+  "private": true,
+  "type": "module",
+  "description": "Overhaul's desktop helper: Chrome profiles, consoles and Orca terminals for the hub's agents.",
+  "bin": {
+    "overhaul-helper": "bin/overhaul-helper"
+  },
+  "dependencies": {
+    "node-pty": "1.1.0"
+  },
+  "scripts": {
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
+  }
+}

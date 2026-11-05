@@ -1,0 +1,4 @@
+#!/usr/bin/env node
+// overhaul-helper: the desktop helper (overhaul-helper.mjs). Dynamic import works whether node
+// reads this extensionless file as CommonJS or as an ES module.
+import("../overhaul-helper.mjs");

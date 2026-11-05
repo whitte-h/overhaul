@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Overhaul</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main style="max-width:380px;margin-top:15vh">
+    <h1 style="font-size:20px;font-weight:600">Overhaul</h1>
+    <form method="post" action="/login">
+      <label for="token" style="font-size:13px;color:var(--muted)">Contraseña</label>
+      <input id="token" name="token" type="password" autocomplete="current-password" required style="margin:6px 0 10px">
+      <input id="next" name="next" type="hidden">
+      <button type="submit">Entrar</button>
+      <p id="error" class="err" hidden>Esa contraseña no es válida.</p>
+      <p id="wait" class="err" hidden>Demasiados intentos fallidos. Espera un momento y vuelve a intentar.</p>
+    </form>
+  </main>
+  <script>
+    const e = new URLSearchParams(location.search).get("error");
+    // Back to the page that asked for the login (e.g. /?p=alpha), unless this is the login page itself.
+    if (location.pathname !== "/login.html") document.getElementById("next").value = location.pathname + location.search;
+    if (e) document.getElementById(e === "wait" ? "wait" : "error").hidden = false;
+  </script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "overhaul",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Per-project agent orchestrator over Orca and tmux: tickets, agent questions, private notes",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "bin": {
+    "overhaul": "bin/hub.mjs",
+    "hub": "bin/hub.mjs"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "release": "node scripts/release.mjs"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  }
+}
