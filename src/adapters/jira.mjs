@@ -2,12 +2,14 @@ import { getJson, secret } from "./index.mjs";
 
 const DEFAULT_JQL = "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC";
 
-const authHeader = (t) => `Basic ${Buffer.from(`${secret(t, "emailEnv")}:${secret(t, "tokenEnv")}`).toString("base64")}`;
+// Jira Cloud: email + API token (Basic), API v3. Jira Server/Data Center (no email_env): a personal
+// access token (Bearer), API v2.
+const authHeader = (t) => (t.emailEnv ? `Basic ${Buffer.from(`${secret(t, "emailEnv")}:${secret(t, "tokenEnv")}`).toString("base64")}` : `Bearer ${secret(t, "tokenEnv")}`);
 
 export async function listJira(t) {
   const base = t.baseUrl.replace(/\/$/, "");
   const auth = authHeader(t);
-  const url = new URL(`${base}/rest/api/3/search/jql`);
+  const url = new URL(t.emailEnv ? `${base}/rest/api/3/search/jql` : `${base}/rest/api/2/search`);
   url.searchParams.set("jql", t.jql ?? DEFAULT_JQL);
   url.searchParams.set("fields", "summary,status");
   url.searchParams.set("maxResults", "50");

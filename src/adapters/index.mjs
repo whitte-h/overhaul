@@ -13,9 +13,10 @@ export async function listTickets(tracker) {
   return list(tracker);
 }
 
-// Description and comments of one ticket, for trackers that offer them (Jira for now).
+// Description and comments of one ticket, for trackers that offer them (Jira Cloud for now: its
+// documents are ADF; Server's are wiki text).
 const DETAILS = { jira: jiraDetails };
-export const hasDetails = (tracker) => !!DETAILS[tracker?.type];
+export const hasDetails = (tracker) => !!DETAILS[tracker?.type] && (tracker.type !== "jira" || !!tracker.emailEnv);
 export async function ticketDetails(tracker, key) {
   return DETAILS[tracker.type](tracker, key);
 }

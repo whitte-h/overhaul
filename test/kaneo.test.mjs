@@ -33,3 +33,32 @@ test("kaneo: projects keeps only those projects, by slug or name, any case", asy
 test("kaneo: exclude_projects leaves those projects out", async () => {
   assert.deepEqual(await keys({ exclude_projects: ["xyz"] }), ["ABC-1", "ABC-3"]);
 });
+
+test("jira: Cloud uses Basic email:token and API v3; Server (no email_env) a Bearer token and API v2", async () => {
+  const { listJira } = await import("../src/adapters/jira.mjs");
+  const { hasDetails } = await import("../src/adapters/index.mjs");
+  const real = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, opts) => {
+    calls.push({ url: String(url), auth: opts.headers.authorization });
+    return new Response(JSON.stringify({ issues: [{ key: "A-1", fields: { summary: "s", status: { name: "To Do" } } }] }), { headers: { "content-type": "application/json" } });
+  };
+  process.env.JT_EMAIL = "me@example.com";
+  process.env.JT_TOKEN = "tok";
+  try {
+    const [cloud, server] = normalize({ version: 2, projects: {
+      c: { tracker: { type: "jira", base_url: "https://x.atlassian.net", email_env: "JT_EMAIL", token_env: "JT_TOKEN" } },
+      s: { tracker: { type: "jira", base_url: "https://jira.example", token_env: "JT_TOKEN" } },
+    } }).projects.map((p) => p.tracker);
+    assert.equal((await listJira(cloud))[0].key, "A-1");
+    assert.equal((await listJira(server))[0].url, "https://jira.example/browse/A-1");
+    assert.match(calls[0].url, /\/rest\/api\/3\/search\/jql\?/);
+    assert.equal(calls[0].auth, `Basic ${Buffer.from("me@example.com:tok").toString("base64")}`);
+    assert.match(calls[1].url, /\/rest\/api\/2\/search\?/);
+    assert.equal(calls[1].auth, "Bearer tok");
+    assert.equal(hasDetails(cloud), true);
+    assert.equal(hasDetails(server), false);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
