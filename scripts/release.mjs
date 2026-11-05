@@ -19,7 +19,8 @@ import { fileURLToPath } from "node:url";
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // What a release carries: top-level folders and files, then exclusions inside them.
-export const INCLUDE = ["bin", "src", "public", "deploy", "helper", "pi", "package.json", "package-lock.json", "install.sh", "config.example.yaml", "README.md", "LICENSE"];
+// deploy: gone since v0.2, kept so a v0.1 tree still packs the same way (tests build v0.1.0).
+export const INCLUDE = ["bin", "src", "public", "deploy", "helper", "pi", "docs", "contract", "package.json", "package-lock.json", "install.sh", "config.example.yaml", "README.md", "LICENSE"];
 const EXCLUDE = [/(^|\/)node_modules\//, /^helper\/orca-layout\.json$/, /(^|\/)\.DS_Store$/];
 
 export function releaseFiles(tracked) {

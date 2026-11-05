@@ -178,3 +178,41 @@ test("set-password writes the variable auth.password_env names, only that line; 
   assert.equal(overhaul(["set-password", "--no-restart"], { env, input: "a-long-password-2\na-long-password-3\n" }).status, 2);
   assert.match(read(path.join(oh, "env")), /^OVERHAUL_PASSWORD=a-long-password-1$/m);
 });
+
+test("helper install: needs Node; copies the helper to ~/.overhaul/helper, npm install, LaunchAgents with that node", () => {
+  const home = tmp("overhaul-helper-");
+  const fakes = path.join(home, "fakes");
+  const npm = fakeTool(fakes, "npm", 'mkdir -p node_modules && echo "$PWD" > npm.cwd');
+  const lc = fakeTool(fakes, "launchctl");
+  // Without node in PATH: it says how to get it and does nothing.
+  const noNode = overhaul(["helper", "install"], { env: cleanEnv(home, { PATH: `${fakes}:/usr/bin:/bin`, OVERHAUL_PLATFORM: "darwin", OVERHAUL_LAUNCHCTL: lc.file }) });
+  assert.equal(noNode.status, 1);
+  assert.match(noNode.stdout + noNode.stderr, /Falta Node/);
+  assert.ok(!fs.existsSync(path.join(home, ".overhaul/helper")));
+
+  const env = cleanEnv(home, { PATH: `${fakes}:${path.dirname(process.execPath)}:/usr/bin:/bin`, OVERHAUL_PLATFORM: "darwin", OVERHAUL_LAUNCHCTL: lc.file });
+  const noLayout = overhaul(["helper", "install"], { env });
+  assert.equal(noLayout.status, 1);
+  assert.match(noLayout.stdout, /orca-layout/);
+
+  write(path.join(home, ".overhaul/orca-layout.json"), "{}");
+  const agents = path.join(home, "Library/LaunchAgents");
+  write(path.join(agents, "com.me.work-hub-chrome.plist"), "<plist>chrome-helper</plist>");
+  write(path.join(agents, "com.me.work-hub-tunnel.plist"), "<plist>ssh</plist>");
+  const r = overhaul(["helper", "install"], { env });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const dir = path.join(home, ".overhaul", CONTRACT.layout.dirs.helper);
+  for (const f of ["overhaul-helper.mjs", "orca.mjs", "package.json", "bin/overhaul-helper"]) assert.ok(fs.existsSync(path.join(dir, f)), f);
+  assert.ok(fs.statSync(path.join(dir, "bin/overhaul-helper")).mode & 0o100);
+  assert.equal(read(path.join(dir, "npm.cwd")).trim(), fs.realpathSync(dir));
+  assert.match(npm.calls()[0], /^install /);
+  for (const label of CONTRACT.services.helper_darwin.labels) {
+    const text = read(path.join(agents, `${label}.plist`));
+    assert.match(text, new RegExp(`<string>${label.replace(".", "\\.")}</string>`));
+    assert.ok(text.includes(`<string>${dir}/`), label);
+    assert.doesNotMatch(text, /__NODE__|__DIR__|__LABEL__/);
+    assert.ok(lc.calls().some((c) => c === `bootstrap gui/${process.getuid()}/${label}` || c.endsWith(`${label}.plist`)));
+  }
+  assert.ok(!fs.existsSync(path.join(agents, "com.me.work-hub-chrome.plist")), "earlier helper removed");
+  assert.ok(fs.existsSync(path.join(agents, "com.me.work-hub-tunnel.plist")), "not a helper: left alone");
+});

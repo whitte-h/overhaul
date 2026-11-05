@@ -5,7 +5,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { normalize } from "../src/config.mjs";
@@ -71,67 +70,4 @@ test("helper LaunchAgent templates carry their placeholders and are balanced", (
     for (const tag of ["dict", "array", "plist"]) assert.equal(t.match(new RegExp(`<${tag}[ >]`, "g")).length, t.split(`</${tag}>`).length - 1, `${f}: <${tag}>`);
   }
   assert.match(fs.readFileSync(path.join(root, "helper/helper.plist"), "utf8"), /__DIR__\/bin\/overhaul-helper</);
-});
-
-// deploy/labels.sh: this version's service names, and the ones earlier installations left.
-function labels(shell, script) {
-  const r = spawnSync(shell, ["-c", `. ${JSON.stringify(path.join(root, "deploy/labels.sh"))}; ${script}`], { encoding: "utf8" });
-  assert.equal(r.status, 0, r.stderr);
-  return r.stdout.split("\n").filter(Boolean).sort();
-}
-const hasZsh = spawnSync("zsh", ["-c", "true"]).status === 0;
-function agentsDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "overhaul-agents-"));
-  const plist = (body) => `<plist><dict><key>ProgramArguments</key><array>${body}</array></dict></plist>\n`;
-  const files = {
-    "overhaul.hub.plist": plist("<string>/r/src/server.mjs</string>"), // current: never "previous"
-    "overhaul.bridge.plist": plist("<string>/r/bin/hub.mjs</string><string>bridge</string>"),
-    "overhaul.helper.plist": plist("<string>/r/helper/bin/overhaul-helper</string>"),
-    "overhaul.orca.plist": plist("<string>/r/helper/orca-restore.mjs</string>"),
-    "com.example.overhaul.plist": plist("<string>/old/src/server.mjs</string>"),
-    "com.example.overhaul-bridge.plist": plist("<string>/old/bin/hub.mjs</string><string>bridge</string>"),
-    "org.sample.work-hub-tunnel.plist": plist("<string>/usr/bin/ssh</string>"),
-    "org.sample.work-hub-chrome.plist": plist("<string>/old/x/chrome-helper.mjs</string>"),
-    "org.sample.work-hub-orca.plist": plist("<string>/old/x/orca-restore.mjs</string>"),
-    "com.vendor.updater.plist": plist("<string>/usr/bin/true</string>"),
-  };
-  for (const [f, body] of Object.entries(files)) fs.writeFileSync(path.join(dir, f), body);
-  return dir;
-}
-
-test("labels.sh: fixed generic names for this version", () => {
-  assert.deepEqual(labels("bash", 'echo "$OVERHAUL_HUB_LABEL $OVERHAUL_BRIDGE_LABEL $OVERHAUL_HELPER_LABEL $OVERHAUL_ORCA_LABEL"'),
-    ["overhaul.hub overhaul.bridge overhaul.helper overhaul.orca"]);
-});
-
-test("labels.sh: earlier LaunchAgents by pattern, split into hub side and helper side", () => {
-  const dir = agentsDir();
-  for (const shell of hasZsh ? ["bash", "zsh"] : ["bash"]) {
-    assert.deepEqual(labels(shell, `previous_launch_agents '${dir}' hub`),
-      ["com.example.overhaul", "com.example.overhaul-bridge", "org.sample.work-hub-tunnel"], shell);
-    assert.deepEqual(labels(shell, `previous_launch_agents '${dir}' helper`),
-      ["org.sample.work-hub-chrome", "org.sample.work-hub-orca"], shell);
-    assert.deepEqual(labels(shell, `previous_launch_agents '${dir}/missing' hub`), [], shell);
-  }
-});
-
-test("labels.sh: earlier systemd units by pattern, never the current ones", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "overhaul-units-"));
-  for (const u of ["overhaul", "overhaul-bridge", "work-hub", "work-hub-bridge", "overhaul-old", "other"]) fs.writeFileSync(path.join(dir, `${u}.service`), "");
-  assert.deepEqual(labels("bash", `previous_units '${dir}'`), ["overhaul-old", "work-hub", "work-hub-bridge"]);
-});
-
-test("helper/install.sh --dry-run: removes only earlier helper LaunchAgents, installs overhaul.helper and overhaul.orca", { skip: !hasZsh && "sin zsh" }, () => {
-  const dir = agentsDir();
-  const layout = path.join(dir, "layout.json");
-  fs.writeFileSync(layout, "{}");
-  const before = fs.readdirSync(dir).sort();
-  const r = spawnSync("zsh", [path.join(root, "helper/install.sh"), "--dry-run"], {
-    encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, OVERHAUL_LAYOUT: layout, OVERHAUL_LAUNCH_AGENTS: dir },
-  });
-  assert.equal(r.status, 0, r.stderr + r.stdout);
-  for (const l of ["org.sample.work-hub-chrome", "org.sample.work-hub-orca"]) assert.match(r.stdout, new RegExp(`\\+ rm -f ${dir}/${l}\\.plist`));
-  assert.doesNotMatch(r.stdout, /work-hub-tunnel|com\.example/); // hub side: not the helper's to remove
-  for (const l of ["overhaul.helper", "overhaul.orca"]) assert.match(r.stdout, new RegExp(`\\+ escribir ${dir}/${l}\\.plist`));
-  assert.deepEqual(fs.readdirSync(dir).sort(), before);
 });

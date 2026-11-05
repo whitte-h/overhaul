@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Desktop helper (install.sh fills __NODE__, __DIR__ and __LABEL__): at login, opens Orca and
-     rebuilds Overhaul's layout in it (~/.config/overhaul/orca-layout.json): projects, hub tabs
+<!-- Desktop helper (overhaul helper install fills __NODE__, __DIR__ and __LABEL__): at login, opens Orca and
+     rebuilds Overhaul's layout in it (~/.overhaul/orca-layout.json): projects, hub tabs
      and agent terminals. Idempotent; runs once per login. -->
 <plist version="1.0">
 <dict>

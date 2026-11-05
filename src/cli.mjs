@@ -104,6 +104,7 @@ const COMMANDS = {
   "install-pi": installPi,
   paths: pathsCommand,
   service: serviceCli,
+  helper: helperCli,
   "set-password": setPassword,
   "install-hooks": installHooksCommand,
   migrate: migrateCommand,
@@ -314,6 +315,13 @@ async function serviceCli([action, only]) {
   const code = await serviceCommand(action, ctx, only);
   if (code === null) fail(`Usage: ${PROG} service install|start|stop|restart|status|uninstall [hub|bridge] [--dry-run]`);
   process.exit(code);
+}
+
+async function helperCli([action]) {
+  if (action !== "install") fail(`Usage: ${PROG} helper install [--dry-run]`);
+  const { context } = await import("./service.mjs");
+  const { installHelper } = await import("./helper.mjs");
+  process.exit(installHelper(context({ self: selfCommand(), dryRun: opt["dry-run"] })));
 }
 
 async function setPassword() {
