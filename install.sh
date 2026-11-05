@@ -17,7 +17,7 @@
 #
 # What it does: downloads overhaul-<os>-<arch> and its .sha256 from the release (gh with a
 # session, GH_TOKEN/GITHUB_TOKEN with the GitHub API, or the public URLs), checks the sha256,
-# puts it in place atomically, then `overhaul init`, the password, `overhaul service install`
+# puts it in place atomically, then `overhaul setup`, the password, `overhaul service install`
 # (which moves an earlier installation into ~/.overhaul) and, if you say yes, the Claude Code hook.
 # Run again to update; `overhaul update` does the same from the executable.
 # Run from a v0.1 release (app/<version>, which is how v0.1's `overhaul update` installs a new
@@ -295,14 +295,15 @@ if [ "$in_path" = 0 ]; then
 fi
 
 if [ "$dry" = 1 ]; then
-  say "+ $BIN init"
+  say "+ $BIN setup"
   [ "$services" = 0 ] || say "+ $BIN service install"
   say "(dry-run) no cambié nada"
   exit 0
 fi
 
 # --- Config, env, password ----------------------------------------------------------------------------
-"$BIN" init
+# `setup` since v0.2.1; an older executable (--version 0.2.0) only knows `init`.
+if "$BIN" help 2>/dev/null | grep -q '^  setup '; then "$BIN" setup; else "$BIN" init; fi
 if ! "$BIN" set-password --check >/dev/null 2>&1; then
   if has_tty; then
     say "Elige la contraseña para entrar al hub:"
@@ -358,4 +359,4 @@ if [ "$services" = 1 ] && "$BIN" set-password --check >/dev/null 2>&1 && command
 fi
 say ""
 say "Overhaul: http://127.0.0.1:$PORT"
-say "Siguiente paso: agrega un proyecto en $("$BIN" paths --json 2>/dev/null | sed -n 's/^ *"config": "\(.*\)",$/\1/p') y reinicia: overhaul service restart"
+say "Siguiente paso: en la carpeta de tu proyecto (un repo, o una carpeta con varios) corre: overhaul init"

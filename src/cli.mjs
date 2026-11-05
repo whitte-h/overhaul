@@ -24,8 +24,15 @@ Hub:
   bridge [--host H] [--interval s]     entrega los mensajes de este host en tmux (lo usa el servicio)
   service install|start|stop|restart|status|uninstall [--dry-run]
 
+Proyectos (en la carpeta del proyecto):
+  init [--non-interactive ...]         asistente: tracker, credenciales, repos con rol, agentes, hooks
+  project list [--json]                proyectos de config.yaml
+  project edit [id]                    reabre el asistente con lo actual (por defecto, el del cwd)
+  project remove <id> [--force]        quita el proyecto de config.yaml
+  open [id]                            abre /p/<proyecto> en el navegador (por defecto, el del cwd)
+
 Instalación:
-  init                                 crea config.yaml y env en ~/.overhaul si faltan
+  setup                                crea config.yaml y env en ~/.overhaul si faltan
   set-password [--no-restart|--check]  contraseña de la página (HUB_TOKEN); --check: ¿hay una?
   migrate [--dry-run]                  adopta ~/.config/overhaul, ~/.local/share/overhaul o work-hub
   paths [--json]                       dónde está todo
@@ -61,6 +68,26 @@ const OPTIONS = {
   version: { type: "string" },
   force: { type: "boolean", default: false },
   help: { type: "boolean", short: "h", default: false },
+  // overhaul init --non-interactive (src/wizard.mjs); --project is the project id there.
+  name: { type: "string" },
+  tracker: { type: "string" },
+  "base-url": { type: "string" },
+  "email-env": { type: "string" },
+  "token-env": { type: "string" },
+  jql: { type: "string" },
+  "workspace-id": { type: "string" },
+  "kaneo-projects": { type: "string" },
+  "exclude-projects": { type: "string" },
+  "kanban-dir": { type: "string" },
+  prefix: { type: "string" },
+  repo: { type: "string", multiple: true },
+  runtime: { type: "string" },
+  command: { type: "string" },
+  prompt: { type: "string" },
+  orchestrator: { type: "string" },
+  "agents-location": { type: "string" },
+  hooks: { type: "boolean" },
+  "no-validate": { type: "boolean" },
 };
 
 let PROG = "overhaul";
@@ -108,7 +135,10 @@ const COMMANDS = {
   "set-password": setPassword,
   "install-hooks": installHooksCommand,
   migrate: migrateCommand,
+  setup: setupCommand,
   init: initCommand,
+  project: projectCommand,
+  open: openCommand,
   config: configCommand,
   "orca-layout": orcaLayoutCommand,
   update: updateCommand,
@@ -330,7 +360,7 @@ async function setPassword() {
   const P = resolvePaths();
   // --check: whether there is one (exit 0) or not (1); asks nothing.
   if (opt.check) process.exit(hasPassword() ? 0 : 1);
-  if (!fs.existsSync(P.env)) fail(`No existe ${P.env}: corre ${PROG} init primero`);
+  if (!fs.existsSync(P.env)) fail(`No existe ${P.env}: corre ${PROG} setup primero`);
   const name = passwordVar();
   const p1 = await readSecret("Nueva contraseña (12+ caracteres): ");
   const p2 = await readSecret("Repítela: ");
@@ -382,10 +412,51 @@ async function migrateCommand() {
   process.exit(["ambiguous", "conflict"].includes(res.status) ? 1 : 0);
 }
 
-async function initCommand() {
-  const { init } = await import("./init.mjs");
-  init({ log: (m) => console.log(m) });
+async function setupCommand() {
+  const { setup } = await import("./init.mjs");
+  setup({ log: (m) => console.log(m) });
   process.exit(0);
+}
+
+// `init` without a project (no project flags, and --non-interactive or no terminal) is `setup`, as
+// before v0.2.1: install.sh 0.2.0 and Homebrew's test run it like that, with stdin not a terminal.
+async function initCommand(rest) {
+  const projectFlags = WIZARD_FLAGS.some((k) => opt[k] !== undefined) || rest.length;
+  if (!projectFlags && (opt["non-interactive"] || !process.stdin.isTTY)) {
+    if (!opt["non-interactive"]) console.error(`Sin terminal: hago ${PROG} setup. El asistente de proyecto necesita una terminal (o --non-interactive con --tracker ...).`);
+    return setupCommand();
+  }
+  const { runInit } = await import("./wizard.mjs");
+  process.exit(await runInit(wizardOptions()));
+}
+
+const WIZARD_FLAGS = ["project", "name", "tracker", "base-url", "email-env", "token-env", "jql", "workspace-id", "kaneo-projects", "exclude-projects", "kanban-dir", "prefix", "repo", "runtime", "command", "prompt", "orchestrator", "agents-location", "hooks", "no-validate"];
+function wizardOptions(extra = {}) {
+  return {
+    cwd: process.cwd(),
+    nonInteractive: opt["non-interactive"],
+    restart: !opt["no-restart"],
+    flags: Object.fromEntries(WIZARD_FLAGS.filter((k) => opt[k] !== undefined).map((k) => [k, opt[k]])),
+    self: selfCommand(),
+    ...extra,
+  };
+}
+
+async function projectCommand([sub, id]) {
+  const usage = `Usage: ${PROG} project list [--json] | edit [id] | remove <id> [--force]`;
+  const w = await import("./wizard.mjs");
+  if (sub === "list") process.exit(w.listProjects({ json: opt.json }));
+  if (sub === "edit") process.exit(await w.editProject(id, wizardOptions()));
+  if (sub === "remove") {
+    if (!id) fail(usage);
+    process.exit(await w.removeProject(id, { force: opt.force, nonInteractive: opt["non-interactive"], restart: !opt["no-restart"], self: selfCommand() }));
+  }
+  fail(usage);
+}
+
+async function openCommand([id]) {
+  const { openProject } = await import("./wizard.mjs");
+  process.exit(await openProject(id, { cwd: process.cwd() }));
 }
 
 async function updateCommand() {

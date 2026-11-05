@@ -1,4 +1,4 @@
-# Contrato de Overhaul (v0.2)
+# Contrato de Overhaul (v0.2.1)
 
 Lo que una instalación de Overhaul promete hacia afuera: el comando, dónde guarda todo, cómo corre como servicio, qué publica una release y cómo hablan el hub, los agentes y el puente. La versión en Go (v0.3) lo respeta para que cambiar de ejecutable no se note: mismo comando, mismos archivos, misma base y misma API.
 
@@ -27,7 +27,12 @@ Un solo ejecutable, `overhaul`, en el `PATH`. Sin Node instalado (excepto el hel
 | Hub | `serve` | Corre el hub (lo que corre el servicio). |
 | | `bridge [--host H] [--interval s]` | Entrega en tmux/Orca los mensajes de este host (lo que corre el servicio del puente). |
 | Servicios | `service install\|start\|stop\|restart\|status\|uninstall [--dry-run]` | Servicios de usuario del hub y el puente. |
-| Instalación | `init [--non-interactive]` | Crea `config.yaml` y `env` (con `HUB_AGENT_TOKEN`) si faltan. Nunca los reemplaza. |
+| Proyectos | `init [--non-interactive …]` | Asistente de proyecto en su carpeta (ver Proyectos). Sin flags de proyecto y con `--non-interactive` o sin terminal, es `setup`. |
+| | `project list [--json]` | Proyectos de config.yaml (`--json`: claves en `contract.json` → `init.project_list_json_keys`). |
+| | `project edit [id]` | Reabre el asistente con lo actual; sin id, el proyecto del cwd. |
+| | `project remove <id> [--force]` | Quita el bloque de config.yaml (pregunta; `--force` sin preguntar). Las credenciales en `env` y los datos de la base quedan. |
+| | `open [id]` | Imprime y abre `http://localhost:<port>/p/<id>`; sin id, el proyecto del cwd. |
+| Instalación | `setup` | Crea `config.yaml` y `env` (con `HUB_AGENT_TOKEN`) si faltan. Nunca los reemplaza. Lo corren install.sh, `service install`, `update` y Homebrew. Antes de v0.2.1 se llamaba `init`. |
 | | `set-password [--no-restart]` | Contraseña de la página (`HUB_TOKEN`, o lo que diga `auth.password_env`). Lee de la terminal sin eco. |
 | | `migrate [--dry-run]` | Adopta una instalación anterior en `~/.overhaul` (ver Migración). |
 | | `paths [--json]` | Dónde está todo (claves en `contract.json` → `paths_json_keys`). |
@@ -40,6 +45,30 @@ Un solo ejecutable, `overhaul`, en el `PATH`. Sin Node instalado (excepto el hel
 | | `orca-layout` | Layout de Orca del helper, en JSON. |
 
 `hub` era el alias de v0.1. El binario funciona con cualquier nombre (un enlace `hub` → `overhaul` sirve), pero el instalador no lo crea en carpetas del sistema: `hub` es también el nombre de otra herramienta de GitHub.
+
+## Proyectos
+
+`overhaul init` corre en la carpeta del proyecto. Pregunta en español, con el valor por defecto entre corchetes (Enter lo acepta), en este orden (`contract.json` → `init`):
+
+1. **Tracker**: `jira`, `kaneo`, `kanban-md` o ninguno. Sin tracker recomienda kanban-md.
+2. **Nombre e id** (`[a-z0-9-]+`, por defecto el nombre de la carpeta).
+3. **Credenciales**, guardadas en `env` (0600) con nombre del proyecto: `<ID>_JIRA_EMAIL` y `<ID>_JIRA_TOKEN` (Jira Cloud; Server/Data Center solo token, `Bearer`), `<ID>_KANEO_TOKEN`. Los tokens se leen sin eco. Se validan contra la API antes de seguir (rutas en `contract.json` → `init.validation`); si fallan, pregunta de nuevo o termina sin cambiar nada.
+   - Jira: lista los proyectos visibles, arma `project = <KEY> AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC` y prueba el JQL.
+   - Kaneo: lista los workspaces (o pide el id), los proyectos del elegido y, si es compartido, escribe `projects` o `exclude_projects`.
+   - kanban-md: carpeta del board (por defecto `<cwd>/kanban`) y prefijo; si no hay board corre `kanban-md init --dir <dir> --name <nombre>`; si kanban-md no está instalado, dice cómo instalarlo y deja el tracker configurado.
+4. **Repos**: si el cwd es un repo, ese; si no, sus carpetas hijas con `.git` (se eligen). Por cada uno propone `role` y `description` (package.json, go.mod, README, nombre) y el usuario los confirma o edita.
+5. **Agentes**: `runtime.command` (`claude`, `pi` o un comando propio), `runtime.prompt` y `runtime.orchestrator`; `agents.location` (`external` por defecto, o `repo`) y `agents.profile: default` (el perfil por defecto; el agente de preguntas llega en #29). Un repo con lane propio (`ORCA.md`, `.pi/`) se respeta: `pi` por defecto si tiene `.pi/`, `agents.location: repo`, sin `profile`.
+6. Muestra el bloque, pide confirmación y lo escribe en `config.yaml` clave por clave (comentarios y demás claves intactos, respaldo `config.yaml.bak`, validado antes de reemplazar).
+7. **Hooks**: si faltan, ofrece el de Claude Code (`~/.claude/settings.json`) y, con `pi` en el `PATH`, su extensión.
+8. Reinicia hub y puente si los servicios están instalados, y muestra (y abre, si hay navegador) `http://localhost:<port>/p/<id>`.
+
+El cwd queda como `runtime.dir`; con varios repos, también como `repos_root` y sin `repo`. Con un solo repo, `repo` es ese. Si ya hay un proyecto en esa carpeta (`runtime.dir`, `repos_root`, `repo` o el primer repo) o con ese id, ofrece editarlo: nunca lo duplica.
+
+`--non-interactive` toma lo mismo de flags: `--project`, `--name`, `--tracker`, `--base-url`, `--email-env`, `--token-env`, `--jql`, `--workspace-id`, `--kaneo-projects a,b`, `--exclude-projects a,b`, `--kanban-dir`, `--prefix`, `--repo path:role:description` (repetible; vacíos = propuestos; sin `--repo`, los detectados), `--runtime claude|pi|<comando>`, `--prompt`, `--orchestrator`, `--agents-location`, `--hooks`, `--no-validate`, `--no-restart`. Los secretos nunca van en flags: se leen de la variable nombrada por `--*-env` (del entorno, que se copia a `env`, o de `env`). Sale con `2` si falta un flag necesario o uno es inválido, `1` si la validación falla.
+
+### `repos`
+
+Una lista de rutas (como antes) o de `{ path, role, description }`, mezclables. La primera es el repo principal si no hay `repo`. Los agentes de ticket reciben en su primer mensaje los repos del proyecto con su rol cuando hay más de uno o tienen rol: un ticket puede tocar varios.
 
 ## Variables de entorno
 
@@ -146,9 +175,10 @@ install.sh [--version X.Y.Z] [--check] [--bin-dir D] [--binary FILE] [--no-servi
 ```
 
 1. Baja `overhaul-<os>-<arch>` y su `.sha256` de la release (gh con sesión, `GH_TOKEN`/`GITHUB_TOKEN` con la API, o las URLs públicas) y verifica el sha256. Con `--binary FILE` usa ese archivo.
-2. Lo deja en la primera carpeta escribible de: `--bin-dir`/`OVERHAUL_BIN_DIR`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.overhaul/bin` (y en este último caso imprime la línea para el `PATH`). Reemplazo atómico (archivo temporal en la misma carpeta + `mv`).
-3. `overhaul init`, la contraseña si falta (interactivo), `overhaul service install` (salvo `--no-services`), y el hook de Claude Code si dices que sí.
+2. Lo deja en la primera carpeta escribible de: `--bin-dir`/`OVERHAUL_BIN_DIR`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.overhaul/bin`. Reemplazo atómico (archivo temporal en la misma carpeta + `mv`). Si esa carpeta no está en el `PATH` y ningún enlace `overhaul` en una carpeta del `PATH` lleva al ejecutable, imprime la línea para el `PATH`.
+3. `overhaul setup` (`init` si el ejecutable es anterior a v0.2.1), la contraseña si falta (interactivo), `overhaul service install` (salvo `--no-services`), y el hook de Claude Code si dices que sí.
 4. Corriendo desde una release v0.1 (`app/<versión>` con `RELEASE`, que es como `overhaul update` de v0.1 instala la nueva), hace lo mismo con esa versión y además: repunta los hooks y la extensión de pi, cambia los enlaces `~/.local/bin/overhaul` y `~/.local/bin/hub` al binario, reinstala el helper si estaba, y borra `app/`.
+5. Los enlaces de v0.1 (`~/.local/bin/overhaul`, `~/.local/bin/hub` → un `.mjs`) se repuntan al binario siempre, salvo el que es la ruta misma del binario (`--bin-dir ~/.local/bin`): ese ya quedó reemplazado por el ejecutable.
 
 `--check` imprime la última versión. `--uninstall` quita servicios y el binario; nunca `~/.overhaul`.
 

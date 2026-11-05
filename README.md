@@ -32,18 +32,18 @@ Overhaul completo en una máquina, Linux o macOS (arm64 o x64): tablero, pregunt
 
    ```bash
    brew install whitte-h/tap/overhaul
-   overhaul init && overhaul set-password && overhaul service install
+   overhaul setup && overhaul set-password && overhaul service install
    ```
 
    La fórmula está en [packaging/homebrew/overhaul.rb](packaging/homebrew/overhaul.rb) y cada release adjunta la suya (`overhaul.rb`). `brew services start overhaul` corre solo el hub; `overhaul service install` corre hub y puente (usa uno de los dos).
 
 3. El instalador:
-   - crea `~/.overhaul/config.yaml` (config v2, sin proyectos, solo `127.0.0.1`, sin helper, tu zona horaria) y `env` (permisos 600, con `HUB_AGENT_TOKEN` aleatorio), solo si no existen (`overhaul init`);
+   - crea `~/.overhaul/config.yaml` (config v2, sin proyectos, solo `127.0.0.1`, sin helper, tu zona horaria) y `env` (permisos 600, con `HUB_AGENT_TOKEN` aleatorio), solo si no existen (`overhaul setup`);
    - te pide la contraseña del hub (`overhaul set-password`);
    - instala el hub y el puente como servicios de usuario (`overhaul service install`): systemd `overhaul` y `overhaul-bridge` en Linux, LaunchAgents `overhaul.hub` y `overhaul.bridge` en macOS (logs en `~/.overhaul/logs`). Corren el ejecutable: `overhaul serve` y `overhaul bridge`;
    - pregunta antes de instalar el hook de Claude Code en `~/.claude/settings.json` (`overhaul install-hooks`).
 4. Abre `http://127.0.0.1:7420` y entra con la contraseña.
-5. Agrega un proyecto en `~/.overhaul/config.yaml` (ver [Agregar un proyecto](#agregar-un-proyecto)) y reinicia: `overhaul service restart`. Los agentes solo necesitan `HUB_PROJECT` y `HUB_TICKET`: el CLI lee `HUB_AGENT_TOKEN` del `env`, y `HUB_URL` es `http://127.0.0.1:7420` por defecto.
+5. Agrega un proyecto: en su carpeta (un repo, o una carpeta con varios) corre `overhaul init` (ver [Agregar un proyecto](#agregar-un-proyecto)). Los agentes solo necesitan `HUB_PROJECT` y `HUB_TICKET`: el CLI lee `HUB_AGENT_TOKEN` del `env`, y `HUB_URL` es `http://127.0.0.1:7420` por defecto.
 
 Opciones del instalador:
 
@@ -84,11 +84,24 @@ La migración (`overhaul migrate`, que `service install` corre sola con los serv
 
 ## Agregar un proyecto
 
-Agrega un bloque en `projects` de `config.yaml` y reinicia (`systemctl --user restart overhaul`, o `launchctl kickstart -k gui/$(id -u)/overhaul.hub` en macOS). [config.example.yaml](config.example.yaml) tiene todas las opciones:
+En la carpeta del proyecto:
+
+```bash
+cd ~/code/acme        # un repo, o una carpeta con varios (api/, web/...)
+overhaul init
+```
+
+El asistente pregunta primero el tracker (jira, kaneo o kanban-md; sin tracker recomienda kanban-md y lo inicializa), pide URL y token sin mostrarlo, los valida contra la API y los guarda en `~/.overhaul/env` con nombre del proyecto (`ACME_JIRA_TOKEN`...). Después lista los proyectos o boards que ves para elegir (en Jira arma el JQL: asignados a ti, sin terminar, del proyecto elegido), detecta los repos y propone el rol y la descripción de cada uno, pregunta cómo corren los agentes (`claude`, `pi` o un comando propio; respeta el lane propio de un repo con `ORCA.md` o `.pi/`), ofrece instalar los hooks que falten, escribe el bloque en `config.yaml` (con tus comentarios), reinicia los servicios y te da `http://localhost:7420/p/<proyecto>`. Correrlo de nuevo en la misma carpeta edita el proyecto.
+
+- `overhaul project list`, `overhaul project edit [id]`, `overhaul project remove <id>`, `overhaul open [id]`.
+- Para scripts: `overhaul init --non-interactive --tracker jira --base-url https://acme.atlassian.net --email-env ACME_JIRA_EMAIL --token-env ACME_JIRA_TOKEN --repo api:backend:"API y modelo de datos" --repo web:frontend:Tienda` (los secretos se leen de esas variables, nunca de flags). Todos los flags en [docs/contract.md](docs/contract.md#proyectos).
+
+A mano: agrega un bloque en `projects` de `config.yaml` y reinicia (`systemctl --user restart overhaul`, o `launchctl kickstart -k gui/$(id -u)/overhaul.hub` en macOS). [config.example.yaml](config.example.yaml) tiene todas las opciones:
 
 - `tracker`: `jira`, `kaneo`, `kanban-md` o `none`. Los campos `*_env` llevan el nombre de la variable en `env`, nunca el secreto.
 - `runtime`: cómo corren sus agentes: `command` (`claude`, `pi` o uno propio), `prompt` del primer mensaje, `dir`, `terminal` (`tmux` u `orca`) y `orchestrator` (`sesión:ventana`). Un agente por ticket, que el puente abre con el primer mensaje.
-- `agents`: dónde vive el perfil de agentes del proyecto (`external`, por defecto, o `repo`). Lo usa `overhaul init` (fase 2).
+- `repos`: rutas, o `{ path, role, description }` por repo (ej. `role: backend`, `description: API y modelo de datos`). Los agentes de ticket reciben el rol de cada repo: un ticket puede tocar varios.
+- `agents`: dónde vive el perfil de agentes del proyecto (`external`, por defecto, o `repo`) y cuál (`profile: default`).
 - `daily_summary`: genera un borrador privado a la hora `at` (zona `timezone`). Incluye movimientos del tracker desde ayer, preguntas que respondiste, commits de `repos` locales, tickets en curso y bloqueos. Nunca se publica: lo revisas y copias desde el hub.
 - `auto_work`: cuando un ticket entra en uno de `statuses`, crea un worktree (`<repo>/../.worktrees/<KEY>`, rama `<key>`) y lanza `agent_command` en una ventana tmux de `tmux_session`. Con `plan_first` el agente te pide aprobar su plan por el hub antes de tocar código; con `initial_questions` (por defecto sí), antes del plan propone las preguntas que necesita (ver abajo). Respeta `max_parallel` y no relanza solo; el botón "Relanzar agente" lo hace. Solo funciona para proyectos que corren en la máquina del hub.
 
@@ -163,7 +176,7 @@ En v0.2 el helper todavía corre en Node (usa node-pty), así que necesita Node 
 ```bash
 npm ci
 npm test
-OVERHAUL_HOME=/tmp/oh node bin/overhaul.mjs init     # una instalación de prueba aparte
+OVERHAUL_HOME=/tmp/oh node bin/overhaul.mjs setup    # una instalación de prueba aparte
 OVERHAUL_HOME=/tmp/oh node bin/overhaul.mjs serve
 npm run build                                        # dist/overhaul-<os>-<arch> para esta máquina
 OVERHAUL_BIN=dist/overhaul-linux-x64 node --test test/contract*.test.mjs

@@ -7,7 +7,9 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { CONTRACT, cleanEnv, freePort, overhaul, tmp } from "./contract-lib.mjs";
+import { spawnSync } from "node:child_process";
+import YAML from "yaml";
+import { BIN, CONTRACT, cleanEnv, freePort, overhaul, tmp } from "./contract-lib.mjs";
 
 const write = (file, text, mode) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -47,10 +49,10 @@ function tree(dir) {
   return out;
 }
 
-test("init: a fresh machine gets ~/.overhaul with config.yaml and env (0600), and init is idempotent", async () => {
+test("setup: a fresh machine gets ~/.overhaul with config.yaml and env (0600), and setup is idempotent", async () => {
   const home = tmp("overhaul-init-");
   const env = cleanEnv(home);
-  const r = overhaul(["init"], { env });
+  const r = overhaul(["setup"], { env });
   assert.equal(r.status, 0, r.stderr);
   const oh = path.join(home, ".overhaul");
   assert.equal(fs.statSync(oh).mode & 0o777, 0o700);
@@ -60,7 +62,11 @@ test("init: a fresh machine gets ~/.overhaul with config.yaml and env (0600), an
   assert.match(cfg, /^version: 2$/m);
   assert.doesNotMatch(cfg, /^data_dir:/m);
   const before = tree(oh);
-  assert.equal(overhaul(["init"], { env }).status, 0);
+  assert.equal(overhaul(["setup"], { env }).status, 0);
+  assert.deepEqual(tree(oh), before);
+  // `init` without a project, and --non-interactive or no terminal, is still setup (v0.2.0 callers).
+  assert.equal(overhaul(["init", "--non-interactive"], { env }).status, 0);
+  assert.equal(overhaul(["init"], { env, input: "" }).status, 0);
   assert.deepEqual(tree(oh), before);
 
   const p = paths(env);
@@ -247,4 +253,37 @@ test("migrate does not run while the hub answers on its port", async () => {
   } finally {
     server.close();
   }
+});
+
+// overhaul init --non-interactive (contract.json -> init): the project's block, project list, remove.
+test("init --non-interactive writes the project block; project list --json and project remove", () => {
+  const home = tmp("overhaul-init-");
+  const parent = path.join(home, "code/shop");
+  for (const r of ["api", "web"]) write(path.join(parent, r, ".git/HEAD"), "ref: refs/heads/main\n");
+  write(path.join(parent, "web/package.json"), JSON.stringify({ description: "Tienda", dependencies: { react: "18" } }));
+  const env = cleanEnv(home, { PATH: "/usr/bin:/bin" });
+  const run = (args) => spawnSync(BIN[0], [...BIN.slice(1), ...args], { env, cwd: parent, encoding: "utf8", timeout: 20_000 });
+  const r = run(["init", "--non-interactive", "--project", "shop", "--tracker", "kanban-md", "--prefix", "SH", "--repo", "api:backend:API: pagos", "--repo", "web::"]);
+  assert.equal(r.status, 0, r.stderr);
+  const p = YAML.parse(read(path.join(home, ".overhaul/config.yaml"))).projects.shop;
+  assert.deepEqual(Object.keys(p).filter((k) => !CONTRACT.init.project_keys.includes(k)), []);
+  assert.deepEqual(p.repos, [
+    { path: "~/code/shop/api", role: "backend", description: "API: pagos" },
+    { path: "~/code/shop/web", role: "frontend", description: "Tienda" },
+  ]);
+  assert.equal(p.repos_root, "~/code/shop");
+  assert.equal(p.runtime.dir, "~/code/shop");
+  assert.deepEqual(p.tracker, { type: "kanban-md", dir: "~/code/shop/kanban", prefix: "SH" });
+  assert.match(r.stderr, new RegExp(CONTRACT.init.link.replace("<port>", "7420").replace("<id>", "shop").replace(/[/.]/g, "\\$&")));
+
+  const list = run(["project", "list", "--json"]);
+  assert.equal(list.status, 0, list.stderr);
+  const rows = JSON.parse(list.stdout);
+  assert.deepEqual(Object.keys(rows[0]).sort(), [...CONTRACT.init.project_list_json_keys].sort());
+  assert.equal(rows[0].dir, parent);
+
+  assert.equal(run(["init", "--non-interactive", "--tracker", "trello"]).status, CONTRACT.command.exit.usage);
+  assert.equal(run(["project", "remove", "nope", "--force"]).status, 1);
+  assert.equal(run(["project", "remove", "shop", "--force"]).status, 0);
+  assert.deepEqual(YAML.parse(read(path.join(home, ".overhaul/config.yaml"))).projects, {});
 });

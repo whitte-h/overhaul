@@ -178,7 +178,7 @@ function removePrevious(ctx) {
 // Writes and starts both services. Returns 0 or 1.
 export async function install(ctx) {
   const { migrateHome, planMigration } = await import("./migrate.mjs");
-  const { init } = await import("./init.mjs");
+  const { setup } = await import("./init.mjs");
   const plan = planMigration({ env: ctx.env, userHome: ctx.home });
   if (["ambiguous", "conflict"].includes(plan.status)) {
     for (const n of plan.notes) ctx.log(`Error: ${n}`);
@@ -191,7 +191,7 @@ export async function install(ctx) {
     if (!ctx.dryRun) ctx.log(`Datos migrados a ${res.home} (respaldo en ${res.backup})`);
   }
   if (!ctx.dryRun) {
-    init({ env: ctx.env, userHome: ctx.home, log: ctx.log });
+    setup({ env: ctx.env, userHome: ctx.home, log: ctx.log });
     await repointAgents(ctx);
     const { hasPassword } = await import("./password.mjs");
     if (!hasPassword({ env: ctx.env, userHome: ctx.home })) ctx.log("Aviso: sin contraseña todavía: el hub no arranca hasta que corras overhaul set-password");

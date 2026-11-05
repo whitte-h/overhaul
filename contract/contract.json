@@ -1,6 +1,6 @@
 {
   "contract": "overhaul",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "command": {
     "name": "overhaul",
     "exit": {
@@ -30,8 +30,15 @@
         "service status",
         "service uninstall"
       ],
-      "setup": [
+      "project": [
         "init",
+        "project list",
+        "project edit",
+        "project remove",
+        "open"
+      ],
+      "setup": [
+        "setup",
         "set-password",
         "migrate",
         "paths",
@@ -475,6 +482,102 @@
       "question_events_question",
       "questions_status",
       "questions_task"
+    ]
+  },
+  "init": {
+    "aliases_setup": [
+      "init --non-interactive (sin flags de proyecto)",
+      "init sin terminal en stdin (sin flags de proyecto)"
+    ],
+    "order": [
+      "tracker",
+      "name_id",
+      "credentials",
+      "repos",
+      "agents",
+      "save",
+      "hooks",
+      "services",
+      "link"
+    ],
+    "trackers": [
+      "jira",
+      "kaneo",
+      "kanban-md",
+      "none"
+    ],
+    "flags": [
+      "--non-interactive",
+      "--project",
+      "--name",
+      "--tracker",
+      "--base-url",
+      "--email-env",
+      "--token-env",
+      "--jql",
+      "--workspace-id",
+      "--kaneo-projects",
+      "--exclude-projects",
+      "--kanban-dir",
+      "--prefix",
+      "--repo",
+      "--runtime",
+      "--prompt",
+      "--orchestrator",
+      "--agents-location",
+      "--hooks",
+      "--no-validate",
+      "--no-restart"
+    ],
+    "repo_flag": "path:role:description (path relativo al cwd; description puede tener ':'; vacíos = propuestos)",
+    "env_names": {
+      "jira_email": "<ID>_JIRA_EMAIL",
+      "jira_token": "<ID>_JIRA_TOKEN",
+      "kaneo_token": "<ID>_KANEO_TOKEN"
+    },
+    "env_id": "id en mayúsculas, todo lo que no es [A-Z0-9] como _",
+    "jira_jql": "project = <KEY> AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
+    "validation": {
+      "jira_cloud": {
+        "auth": "Basic base64(email:token)",
+        "myself": "/rest/api/3/myself",
+        "projects": "/rest/api/3/project/search",
+        "jql": "/rest/api/3/search/jql"
+      },
+      "jira_server": {
+        "auth": "Bearer token",
+        "myself": "/rest/api/2/myself",
+        "projects": "/rest/api/2/project",
+        "jql": "/rest/api/2/search"
+      },
+      "kaneo": {
+        "auth": "Bearer token",
+        "workspaces": "/api/auth/organization/list (opcional; 404 = pedir el id)",
+        "projects": "/api/project?workspaceId=<id>"
+      }
+    },
+    "project_keys": [
+      "name",
+      "repo",
+      "repos",
+      "repos_root",
+      "tracker",
+      "agents",
+      "runtime"
+    ],
+    "repos_entry": {
+      "path": "string",
+      "role": "string?",
+      "description": "string?"
+    },
+    "existing": "mismo dir (runtime.dir, repos_root, repo o repos[0]) o mismo id: se edita, nunca se duplica",
+    "link": "http://localhost:<port>/p/<id>",
+    "project_list_json_keys": [
+      "id",
+      "name",
+      "tracker",
+      "dir",
+      "repos"
     ]
   }
 }

@@ -219,7 +219,7 @@ test("install.sh: curl | sh installs the executable, verified, and sets up ~/.ov
     assert.match(r.stdout, /no está en tu PATH[\s\S]*export PATH=/);
     assert.ok(fs.existsSync(path.join(home, ".overhaul/config.yaml")));
     assert.match(fs.readFileSync(path.join(home, ".overhaul/env"), "utf8"), /^HUB_AGENT_TOKEN=/m);
-    assert.match(calls(home), /^init$/m);
+    assert.match(calls(home), /^setup$/m);
     assert.match(calls(home), /^migrate$/m); // --no-services: migrate without services
     assert.match(r.stderr, /sin contraseña/);
     assert.deepEqual(fs.readdirSync(binDir(home)), ["overhaul"], "no temporary files left");
