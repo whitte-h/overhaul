@@ -243,6 +243,18 @@ async function spawnOrcaWorker(p, t) {
   console.error(`spawned Orca terminal ${title} in ${worktree} for ${id}`);
 }
 
+// The project's repos with their role, when it has several or says what each one is for. A ticket
+// can touch more than one: the agent works in each one it needs, on the same branch.
+function repoLines(repos = []) {
+  if (!repos.length || (repos.length === 1 && !repos[0].role && !repos[0].description)) return [];
+  const home = process.env.HOME;
+  const shown = (p) => (home && p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p);
+  return [
+    "Repos del proyecto (un ticket puede tocar varios; en cada uno que cambies, usa la misma rama):",
+    ...repos.map((r) => `- ${shown(r.path)}${r.role ? ` (${r.role})` : ""}${r.description ? `: ${r.description}` : ""}`),
+  ];
+}
+
 export function workerIntro(t, w) {
   const prompt = t.spawn?.prompt ? t.spawn.prompt.replaceAll("{key}", t.key) : "";
   const restart = w.command === "pi"
@@ -253,6 +265,7 @@ export function workerIntro(t, w) {
     `[${TAG}] Eres el agente del ticket ${t.key}${t.title ? `: ${t.title}` : ""}.`,
     t.url ? `Ticket: ${t.url}` : "",
     "Este proceso es solo para este ticket: haz lo que necesite para completarlo (leer el ticket, repos, PRs, pruebas).",
+    ...repoLines(t.spawn?.repos),
     `Antes de planear o cambiar código, propón las preguntas que necesitas para completarlo: overhaul propose "<pregunta 1>" "<pregunta 2>" … y detente. El usuario las refina y responde en el hub; te llega un mensaje "[${TAG}] Preguntas iniciales revisadas" en esta ventana. Si no necesitas ninguna, sáltate este paso.`,
     `Si te falta una decisión o un dato, pregúntale al usuario con: overhaul ask "<pregunta>" --blocks "<qué frena>" (HUB_PROJECT y HUB_TICKET ya están definidos). El comando no espera: la respuesta te llega después como mensaje en esta ventana; mientras, sigue con lo que no dependa de ella.`,
     "Antes de algo irreversible (merge, cambiar el estado del ticket, borrar ramas) confirma por el hub.",

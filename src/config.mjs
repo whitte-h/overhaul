@@ -73,8 +73,10 @@ export function normalize(raw) {
     if (t && !TRACKERS.includes(t.type)) throw new Error(`${id}: tracker.type must be one of ${TRACKERS.join(", ")} or none`);
     const daily = { ...asObject(defaults.daily_summary), ...asObject(p.daily_summary) };
     const auto = { ...asObject(defaults.auto_work), ...asObject(p.auto_work) };
-    const repo = expandHome(p.repo ?? p.repos?.[0] ?? null);
-    const rt = runtime(id, p, cfg.terminal, p.repo ?? p.repos?.[0]);
+    const repoList = repoEntries(id, p.repos ?? (p.repo ? [p.repo] : []));
+    const firstRepo = p.repo ?? repoList[0]?.path;
+    const repo = expandHome(firstRepo ?? null);
+    const rt = runtime(id, p, cfg.terminal, firstRepo);
 
     cfg.projects.push({
       id,
@@ -83,7 +85,10 @@ export function normalize(raw) {
       chromeProfile: pick(p, "chrome_profile", "chromeProfile") ?? null,
       links: Array.isArray(p.links) ? p.links : Object.entries(p.links ?? {}).map(([label, url]) => ({ label, url })),
       repo,
-      repos: (p.repos ?? (p.repo ? [p.repo] : [])).map(expandHome),
+      repos: repoList.map((r) => expandHome(r.path)),
+      // Each repo's role and description (repos: [{ path, role, description }]), for the agents'
+      // context: which repo does what. A plain path has neither.
+      repoInfo: repoList.map((r) => ({ ...r, path: expandHome(r.path) })),
       github: p.github?.owner ? { owner: String(p.github.owner) } : null, // PRs looked up by the host bridge with its gh
       // tmux target ("session:window") that gets messages for tickets without their own window.
       orchestrator: rt.orchestrator,
@@ -128,7 +133,7 @@ export function normalize(raw) {
         // With plan_first: before the plan, the agent proposes the questions it needs.
         initialQuestions: auto.initial_questions ?? true,
         agentCommand: auto.agent_command ?? "claude",
-        repo: expandHome(auto.repo ?? p.repo ?? p.repos?.[0]),
+        repo: expandHome(auto.repo ?? firstRepo),
         // Tracker group (Kaneo project name) -> repo, for boards that span several repos.
         repoByGroup: Object.fromEntries(Object.entries(auto.repos_by_group ?? {}).map(([g, r]) => [g.toLowerCase(), expandHome(r)])),
         worktreeRoot: expandHome(auto.worktree_root ?? null),
@@ -179,6 +184,15 @@ function runtime(id, p, defaultTerminal, repo) {
     terminals = { type, worktree: String(worktree) };
   }
   return { worker, terminals, orchestrator: r?.orchestrator ?? p.orchestrator ?? null };
+}
+
+// repos: a list of paths, or of { path, role, description }; both can be mixed.
+function repoEntries(id, repos) {
+  return (Array.isArray(repos) ? repos : [repos]).map((r) => {
+    if (typeof r === "string") return { path: r, role: null, description: null };
+    if (!r || typeof r !== "object" || !r.path) throw new Error(`${id}: each repos entry is a path or { path, role, description }`);
+    return { path: String(r.path), role: r.role ? String(r.role) : null, description: r.description ? String(r.description) : null };
+  });
 }
 
 function agents(id, a) {

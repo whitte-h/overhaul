@@ -28,6 +28,7 @@ defaults:
   create_tickets: false            # general agent (chat icon) may create tickets in the tracker
 
 # --- Projects -------------------------------------------------------------------------------
+# `overhaul init` in a project's folder writes its block (and `overhaul project edit` changes it).
 projects:
   myapp:
     name: My App
@@ -41,7 +42,7 @@ projects:
     # Which agent crew runs the project and where its profile lives: external (Overhaul's
     # config, default) or repo (AGENTS.md, .claude/agents; also when the repo has its own
     # lane: ORCA.md or .pi/).
-    agents: { location: external }
+    agents: { location: external, profile: default }
     runtime:
       command: claude              # claude | pi | your own command
       # prompt: "/skill:my-orchestrator {key}"   # opens each ticket agent's first message
@@ -72,7 +73,10 @@ projects:
       # token_env: KANEO_CLIENT_TOKEN
       # task_url: https://kaneo.example.com/ws/task/{key}
     runtime: { dir: ~/code/client, orchestrator: client:orq }
-    repos: [~/code/client/api, ~/code/client/web]
+    # Paths, or { path, role, description }: ticket agents get each repo's role (a ticket can touch several).
+    repos:
+      - { path: ~/code/client/api, role: backend, description: API and data model }
+      - { path: ~/code/client/web, role: frontend, description: Web app }
     # repos_root: ~/code/client    # the hub asks about repos here without a project, and clones new ones here
     daily_summary:
       enabled: true

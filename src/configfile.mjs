@@ -26,7 +26,7 @@ export function addRepoMapping(doc, projectId, group, repoPath) {
   doc.setIn(["projects", projectId, "auto_work", "repos_by_group", group], shown);
   const repos = doc.getIn(["projects", projectId, "repos"]);
   const list = repos ? repos.toJSON() : [];
-  if (!list.map((r) => String(r)).includes(shown)) doc.setIn(["projects", projectId, "repos"], doc.createNode([...list, shown], { flow: true }));
+  if (!list.map((r) => String(r?.path ?? r)).includes(shown)) doc.setIn(["projects", projectId, "repos"], doc.createNode([...list, shown], { flow: true }));
 }
 
 export const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? `~/${p.slice(os.homedir().length + 1)}` : p);

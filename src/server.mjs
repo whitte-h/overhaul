@@ -94,7 +94,7 @@ function pendingWithSpawn(p) {
       ...t,
       title: info.title ?? "",
       url: info.url ?? "",
-      spawn: p.worker ? { dir: repo ?? p.worker.dir, command: p.worker.command, prompt: p.worker.prompt, session: p.orchestrator?.split(":")[0] ?? p.id } : null,
+      spawn: p.worker ? { dir: repo ?? p.worker.dir, command: p.worker.command, prompt: p.worker.prompt, session: p.orchestrator?.split(":")[0] ?? p.id, repos: p.repoInfo } : null,
     };
   });
 }

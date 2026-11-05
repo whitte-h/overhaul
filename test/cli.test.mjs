@@ -94,3 +94,17 @@ test("helper layout: OVERHAUL_LAYOUT, else ~/.overhaul, else ~/.config/overhaul,
   }
 });
 
+
+test("worker intro lists the project's repos with their role when there are several (OVH-28)", async () => {
+  const { workerIntro } = await import("../src/bridge.mjs");
+  const repos = [
+    { path: `${process.env.HOME}/code/x/api`, role: "backend", description: "API y modelo de datos" },
+    { path: "/srv/x/web", role: "frontend", description: null },
+  ];
+  const intro = workerIntro({ key: "ABC-1", title: "t", spawn: { repos } }, { command: "claude" });
+  assert.match(intro, /Repos del proyecto \(un ticket puede tocar varios/);
+  assert.match(intro, /^- ~\/code\/x\/api \(backend\): API y modelo de datos$/m);
+  assert.match(intro, /^- \/srv\/x\/web \(frontend\)$/m);
+  // One plain repo says nothing new.
+  assert.doesNotMatch(workerIntro({ key: "A-1", spawn: { repos: [{ path: "/r", role: null, description: null }] } }, { command: "claude" }), /Repos del proyecto/);
+});

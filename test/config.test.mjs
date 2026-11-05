@@ -69,8 +69,9 @@ test("generic example (v2): no hosts, loopback only, helper off, every option va
   assert.deepEqual(app.repos, [app.repo]);
   assert.deepEqual(app.worker, { dir: "~/code/myapp", command: "claude", prompt: null });
   assert.equal(app.orchestrator, "myapp:orq");
-  assert.deepEqual(app.agents, { profile: null, location: "external" });
+  assert.deepEqual(app.agents, { profile: "default", location: "external" });
   assert.deepEqual(client.worker, { dir: "~/code/client", command: "claude", prompt: null });
+  assert.deepEqual(client.repoInfo.map((r) => r.role), ["backend", "frontend"]);
   assert.equal(client.tracker.type, "jira");
 });
 
@@ -269,4 +270,23 @@ test("config migrate: explicit version 1 is replaced, unknown versions refused, 
 test("auto_work agent defaults to claude whatever the runtime command", () => {
   assert.equal(normalize({ projects: { a: { worker: { command: "pi" }, auto_work: { enabled: true, repo: "~/x" } } } }).projects[0].autoWork.agentCommand, "claude");
   assert.equal(normalize({ version: 2, projects: { a: { repo: "~/x", runtime: { command: "pi" }, auto_work: true } } }).projects[0].autoWork.agentCommand, "claude");
+});
+
+test("repos: paths or { path, role, description }, mixed; the first one is the main repo (OVH-28)", () => {
+  const cfg = normalize({ version: 2, projects: { x: {
+    repos: [{ path: "~/code/x/api", role: "backend", description: "API y modelo de datos" }, "~/code/x/web"],
+    auto_work: { enabled: true },
+    runtime: {},
+  } } });
+  const p = cfg.projects[0];
+  const home = os.homedir();
+  assert.deepEqual(p.repos, [path.join(home, "code/x/api"), path.join(home, "code/x/web")]);
+  assert.deepEqual(p.repoInfo, [
+    { path: path.join(home, "code/x/api"), role: "backend", description: "API y modelo de datos" },
+    { path: path.join(home, "code/x/web"), role: null, description: null },
+  ]);
+  assert.equal(p.repo, path.join(home, "code/x/api"));
+  assert.equal(p.autoWork.repo, path.join(home, "code/x/api"));
+  assert.equal(p.worker.dir, "~/code/x/api");
+  assert.throws(() => normalize({ version: 2, projects: { x: { repos: [{ role: "backend" }] } } }), /each repos entry/);
 });
