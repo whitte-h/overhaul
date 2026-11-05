@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the v0.1 -> executable test builds v0.1.0 from its commit
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}

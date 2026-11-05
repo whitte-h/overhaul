@@ -63,97 +63,14 @@ test("standalone config: loopback, no helper, no projects, given time zone", () 
   assert.doesNotMatch(text, /\b100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d/);
 });
 
-test("service templates carry every placeholder install.sh fills", () => {
-  const dir = path.join(root, "deploy/standalone");
-  for (const f of ["overhaul.service", "overhaul-bridge.service"]) {
-    const t = fs.readFileSync(path.join(dir, f), "utf8");
-    for (const p of ["__NODE__", "__DIR__", "__PATH__", "__CONFIG_DIR__"]) assert.ok(t.includes(p), `${f}: ${p}`);
-    assert.doesNotMatch(t, /--host|HUB_HOST/);
-  }
-  const plists = [
-    ["deploy/standalone/hub.plist", ["__NODE__", "__DIR__", "__PATH__", "__CONFIG_DIR__", "__LOGS__"]],
-    ["deploy/standalone/bridge.plist", ["__NODE__", "__DIR__", "__PATH__", "__CONFIG_DIR__", "__LOGS__"]],
-    ["helper/helper.plist", ["__NODE__", "__DIR__"]],
-    ["helper/orca.plist", ["__NODE__", "__DIR__"]],
-  ];
-  for (const [f, placeholders] of plists) {
+test("helper LaunchAgent templates carry their placeholders and are balanced", () => {
+  for (const [f, placeholders] of [["helper/helper.plist", ["__NODE__", "__DIR__"]], ["helper/orca.plist", ["__NODE__", "__DIR__"]]]) {
     const t = fs.readFileSync(path.join(root, f), "utf8");
     assert.match(t, /<key>Label<\/key>\s*<string>__LABEL__<\/string>/, `${f}: label`); // the installer names it
     for (const p of placeholders) assert.ok(t.includes(p), `${f}: ${p}`);
     for (const tag of ["dict", "array", "plist"]) assert.equal(t.match(new RegExp(`<${tag}[ >]`, "g")).length, t.split(`</${tag}>`).length - 1, `${f}: <${tag}>`);
   }
   assert.match(fs.readFileSync(path.join(root, "helper/helper.plist"), "utf8"), /__DIR__\/bin\/overhaul-helper</);
-});
-
-// install.sh with its own HOME; HUB_CONFIG_DIR, XDG and HUB_* from the real session removed.
-function install(home, ...args) {
-  const env = { PATH: process.env.PATH, HOME: home, OVERHAUL_SKIP_NPM: "1", USER: process.env.USER ?? "u" };
-  return spawnSync("bash", [path.join(root, "install.sh"), ...args], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-}
-const tmpHome = () => fs.mkdtempSync(path.join(os.tmpdir(), "overhaul-install-"));
-
-test("install.sh --dry-run changes nothing", () => {
-  const home = tmpHome();
-  const r = install(home, "--dry-run");
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /Overhaul: http:\/\/127\.0\.0\.1:7420/);
-  assert.match(r.stdout, /\+ ln -sfn /);
-  assert.deepEqual(fs.readdirSync(home), []);
-});
-
-test("install.sh refuses a machine that already runs work-hub, unless --force", () => {
-  const home = tmpHome();
-  fs.mkdirSync(path.join(home, ".config/systemd/user"), { recursive: true });
-  fs.writeFileSync(path.join(home, ".config/systemd/user/work-hub.service"), "");
-  const r = install(home, "--dry-run");
-  assert.notEqual(r.status, 0);
-  assert.match(r.stdout, /work-hub\n/);
-  assert.match(r.stderr, /instalación anterior/);
-  assert.equal(install(home, "--dry-run", "--force").status, 0);
-});
-
-test("install.sh creates config, env and link once, keeps them on rerun, uninstall keeps config", () => {
-  const home = tmpHome();
-  const r = install(home, "--no-services", "--non-interactive");
-  assert.equal(r.status, 0, r.stderr + r.stdout);
-  const cfgDir = path.join(home, ".config/overhaul");
-  const cfgFile = path.join(cfgDir, "config.yaml");
-  const envFile = path.join(cfgDir, "env");
-  assert.deepEqual(normalize(YAML.parse(fs.readFileSync(cfgFile, "utf8"))).bind, ["127.0.0.1"]);
-  assert.equal(fs.statSync(envFile).mode & 0o777, 0o600);
-  const env = fs.readFileSync(envFile, "utf8");
-  assert.match(env, /^HUB_AGENT_TOKEN=[0-9a-f]{64}$/m);
-  const link = path.join(home, ".local/bin/hub");
-  assert.equal(fs.readlinkSync(link), path.join(root, "bin/hub.mjs"));
-  assert.equal(fs.readlinkSync(path.join(home, ".local/bin/overhaul")), path.join(root, "bin/hub.mjs"));
-  assert.equal(normalize(YAML.parse(fs.readFileSync(cfgFile, "utf8"))).version, 2);
-  assert.match(r.stderr, /set-password/); // no password without a terminal
-
-  // Rerun: updates, never overwrites what you edited.
-  fs.appendFileSync(cfgFile, "# mine\n");
-  fs.appendFileSync(envFile, "HUB_TOKEN=a-long-password-here\n");
-  const again = install(home, "--no-services", "--non-interactive");
-  assert.equal(again.status, 0, again.stderr);
-  assert.match(fs.readFileSync(cfgFile, "utf8"), /# mine\n$/);
-  assert.equal(fs.readFileSync(envFile, "utf8"), `${env}HUB_TOKEN=a-long-password-here\n`);
-  assert.match(again.stdout, /ya existe, no la toco/);
-
-  const un = install(home, "--uninstall");
-  assert.equal(un.status, 0, un.stderr);
-  assert.ok(!fs.existsSync(link));
-  assert.ok(!fs.existsSync(path.join(home, ".local/bin/overhaul")));
-  assert.ok(fs.existsSync(cfgFile) && fs.existsSync(envFile));
-});
-
-test("install.sh keeps using ~/.config/work-hub when that is the only config", () => {
-  const home = tmpHome();
-  const legacy = path.join(home, ".config/work-hub");
-  fs.mkdirSync(legacy, { recursive: true });
-  fs.writeFileSync(path.join(legacy, "config.yaml"), "port: 7420\n");
-  const r = install(home, "--no-services", "--non-interactive");
-  assert.equal(r.status, 0, r.stderr + r.stdout);
-  assert.match(r.stdout, /work-hub\/config\.yaml ya existe/);
-  assert.ok(!fs.existsSync(path.join(home, ".config/overhaul")));
 });
 
 // deploy/labels.sh: this version's service names, and the ones earlier installations left.
@@ -202,23 +119,6 @@ test("labels.sh: earlier systemd units by pattern, never the current ones", () =
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "overhaul-units-"));
   for (const u of ["overhaul", "overhaul-bridge", "work-hub", "work-hub-bridge", "overhaul-old", "other"]) fs.writeFileSync(path.join(dir, `${u}.service`), "");
   assert.deepEqual(labels("bash", `previous_units '${dir}'`), ["overhaul-old", "work-hub", "work-hub-bridge"]);
-});
-
-test("install.sh: services of an earlier installation block it without a terminal; uninstall lists and keeps them", () => {
-  const home = tmpHome();
-  const units = path.join(home, ".config/systemd/user");
-  fs.mkdirSync(units, { recursive: true });
-  fs.writeFileSync(path.join(units, "overhaul-old.service"), "");
-  const r = install(home, "--no-services", "--non-interactive");
-  assert.notEqual(r.status, 0);
-  assert.match(r.stdout, /overhaul-old/);
-  assert.match(r.stderr, /--force/);
-  assert.ok(!fs.existsSync(path.join(home, ".config/overhaul")), "nothing installed");
-  assert.equal(install(home, "--no-services", "--non-interactive", "--force").status, 0);
-  const un = install(home, "--uninstall", "--non-interactive");
-  assert.equal(un.status, 0, un.stderr);
-  assert.match(un.stdout, /overhaul-old[\s\S]*siguen ahí/);
-  assert.ok(fs.existsSync(path.join(units, "overhaul-old.service")));
 });
 
 test("helper/install.sh --dry-run: removes only earlier helper LaunchAgents, installs overhaul.helper and overhaul.orca", { skip: !hasZsh && "sin zsh" }, () => {

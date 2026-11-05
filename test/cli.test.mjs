@@ -74,24 +74,6 @@ test("worker intro asks for initial questions with overhaul propose, with or wit
   }
 });
 
-test("install-hooks --repoint fixes hooks whose script no longer exists", () => {
-  const dir = tmp("overhaul-hooks-");
-  const settings = path.join(dir, "settings.json");
-  const gone = "node /nowhere/work-hub/bin/hub-hook.mjs";
-  const kept = `node ${path.join(root, "bin/hub-hook.mjs")}`;
-  const hooks = (cmd) => ({ hooks: [{ type: "command", command: cmd, timeout: 5 }] });
-  fs.writeFileSync(settings, JSON.stringify({ hooks: { Stop: [hooks(gone)], UserPromptSubmit: [hooks(kept)] } }));
-  const py = (...a) => spawnSync("python3", [path.join(root, "deploy/install-hooks.py"), ...a], { encoding: "utf8" });
-  const want = `node ${path.join(root, "bin/hub-hook.mjs")} --x`;
-  assert.match(py(want, settings).stdout, /changed PermissionRequest, Notification/); // without --repoint the broken one stays
-  assert.equal(JSON.parse(fs.readFileSync(settings, "utf8")).hooks.Stop[0].hooks[0].command, gone);
-  assert.match(py("--repoint", want, settings).stdout, /Stop \(repointed\)/);
-  const s = JSON.parse(fs.readFileSync(settings, "utf8"));
-  assert.equal(s.hooks.Stop[0].hooks[0].command, want);
-  assert.equal(s.hooks.UserPromptSubmit[0].hooks[0].command, kept); // existing script: left alone
-  assert.ok(fs.readdirSync(dir).some((f) => f.startsWith("settings.json.bak-overhaul-")));
-});
-
 test("helper layout: OVERHAUL_LAYOUT, else ~/.overhaul, else ~/.config/overhaul, origins default to the hub", async () => {
   const { layoutFile } = await import("../helper/orca.mjs");
   const home = tmp("overhaul-layout-");
@@ -112,24 +94,3 @@ test("helper layout: OVERHAUL_LAYOUT, else ~/.overhaul, else ~/.config/overhaul,
   }
 });
 
-test("install-hooks --repoint-only repoints and adds nothing", () => {
-  const dir = tmp("overhaul-hooks-");
-  const settings = path.join(dir, "settings.json");
-  fs.writeFileSync(settings, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "node /gone/bin/hub-hook.mjs" }] }] } }));
-  const r = spawnSync("python3", [path.join(root, "deploy/install-hooks.py"), "--repoint-only", "node /new/hub-hook.mjs", settings], { encoding: "utf8" });
-  assert.match(r.stdout, /Stop \(repointed\)$/m);
-  const s = JSON.parse(fs.readFileSync(settings, "utf8"));
-  assert.deepEqual(Object.keys(s.hooks), ["Stop"]);
-  assert.equal(s.hooks.Stop[0].hooks[0].command, "node /new/hub-hook.mjs");
-});
-
-test("set-password writes the variable config.yaml names in auth.password_env", () => {
-  const dir = tmp("overhaul-pw-");
-  fs.writeFileSync(path.join(dir, "config.yaml"), "version: 2\nauth: { password_env: OVERHAUL_PASSWORD }\n");
-  fs.writeFileSync(path.join(dir, "env"), "HUB_AGENT_TOKEN=x\n", { mode: 0o600 });
-  const r = spawnSync("bash", [path.join(root, "bin/set-password"), "--no-restart"], {
-    input: "a-long-password-1\na-long-password-1\n", encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, HUB_CONFIG_DIR: dir },
-  });
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(fs.readFileSync(path.join(dir, "env"), "utf8"), "OVERHAUL_PASSWORD=a-long-password-1\nHUB_AGENT_TOKEN=x\n");
-});

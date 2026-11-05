@@ -1,6 +1,9 @@
-// Release tarball (scripts/release.mjs) and install.sh in release mode, against a local HTTP server
-// that mimics GitHub Releases (OVERHAUL_RELEASES_URL). Always with a temporary HOME, --no-services
-// and no npm: never this machine's installation.
+// Release assets and install.sh, against a local HTTP server that mimics GitHub Releases
+// (OVERHAUL_RELEASES_URL, OVERHAUL_API_URL). Always a temporary HOME, --bin-dir or OVERHAUL_BIN_DIR
+// in it, --no-services and a fake systemctl: never this machine's installation.
+//
+// The served executables are stand-ins: a script that answers `version` with its release and
+// runs the real CLI from this repo for everything else (so init, migrate, install-hooks are real).
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -10,27 +13,56 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { buildRelease, releaseFiles, sha256File, tarballName } from "../scripts/release.mjs";
+import { update } from "../src/update.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const hasCurl = spawnSync("curl", ["--version"]).status === 0;
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
+const OS = process.platform === "darwin" ? "darwin" : "linux";
+const ARCH = ["arm64", "aarch64"].includes(os.arch()) ? "arm64" : "x64";
+const ASSET = `overhaul-${OS}-${ARCH}`;
+const V01 = "4e3160c"; // the v0.1.0 release commit: its tarball is the real v0.1 installer
+const hasV01 = spawnSync("git", ["-C", root, "cat-file", "-e", `${V01}^{commit}`]).status === 0;
 
-// Three releases built once, served as releases/download/vX.Y.Z/<file>; latest is the last one.
+// Three releases, served as releases/download/vX.Y.Z/<file>; latest is the last one. 0.1.0's
+// tarball is built from the v0.1.0 commit when the history has it.
 const VERSIONS = ["0.1.0", "0.2.0", "0.3.0"];
 const dist = tmp("overhaul-dist-");
 for (const version of VERSIONS) buildRelease({ out: dist, version });
+if (hasV01) {
+  const old = tmp("overhaul-v01-src-");
+  const archive = spawnSync("git", ["-C", root, "archive", V01], { maxBuffer: 64 * 1024 * 1024 });
+  spawnSync("tar", ["-x", "-C", old], { input: archive.stdout });
+  for (const args of [["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "v0.1.0"]]) spawnSync("git", ["-C", old, ...args]);
+  buildRelease({ out: dist, version: "0.1.0", cwd: old });
+}
+const NODE = process.execPath;
+for (const version of VERSIONS) {
+  const file = path.join(dist, ASSET);
+  fs.writeFileSync(`${file}-${version}`, `#!/bin/sh
+[ "$1" = version ] && { echo ${version}; exit 0; }
+echo "$*" >> "$HOME/overhaul-calls.log"
+exec '${NODE}' '${path.join(root, "bin/overhaul.mjs")}' "$@"
+`, { mode: 0o755 });
+  fs.writeFileSync(`${file}-${version}.sha256`, `${sha256File(`${file}-${version}`)}  ${ASSET}\n`);
+}
+const servedFile = (v, name) => {
+  if (name === "install.sh") return path.join(root, "install.sh");
+  if (name === ASSET || name === `${ASSET}.sha256`) return path.join(dist, name.replace(ASSET, `${ASSET}-${v}`));
+  return path.join(dist, name);
+};
 
 // private: the public URLs answer 404 (as github.com does for a private repo) and only the API
 // with TOKEN serves the assets. requests logs what reached the server (path and Authorization).
 const TOKEN = "test-token-123";
 const REPO = "acme/overhaul";
+const NAMES = (v) => [tarballName(v), `${tarballName(v)}.sha256`, "install.sh", ASSET, `${ASSET}.sha256`];
 const releaseJson = (v) => ({
-  url: `https://api.example/repos/${REPO}/releases/1`, assets_url: `https://api.example/repos/${REPO}/releases/1/assets`,
-  tag_name: `v${v}`, name: `Overhaul v${v}`,
+  url: `https://api.example/repos/${REPO}/releases/1`, tag_name: `v${v}`, name: `Overhaul v${v}`,
   author: { login: "someone", url: "https://api.example/users/someone" },
-  assets: [tarballName(v), `${tarballName(v)}.sha256`, "install.sh"].map((name, i) => ({
+  assets: NAMES(v).map((name, i) => ({
     url: `https://api.example/repos/${REPO}/releases/assets/${VERSIONS.indexOf(v) * 10 + i + 1}`,
-    id: VERSIONS.indexOf(v) * 10 + i + 1, node_id: "X", name, label: "",
+    id: VERSIONS.indexOf(v) * 10 + i + 1, name, label: "",
     uploader: { login: "someone", id: 7, url: "https://api.example/users/someone", type: "User" },
     content_type: "application/octet-stream", size: 1,
     browser_download_url: `https://example/${REPO}/releases/download/v${v}/${name}`,
@@ -38,57 +70,52 @@ const releaseJson = (v) => ({
 });
 function assetById(id) {
   const v = VERSIONS[Math.floor((id - 1) / 10)];
-  const name = v && [tarballName(v), `${tarballName(v)}.sha256`, "install.sh"][(id - 1) % 10];
-  return name && (name === "install.sh" ? path.join(root, "install.sh") : path.join(dist, name));
+  const name = v && NAMES(v)[(id - 1) % 10];
+  return name && { v, name };
 }
 
 function startServer({ latest = VERSIONS.at(-1), tamper = false, private: priv = false } = {}) {
   const requests = [];
+  const serve = (res, v, name) => {
+    const file = servedFile(v, name);
+    if (!VERSIONS.includes(v) || !fs.existsSync(file)) return res.writeHead(404).end();
+    let body = fs.readFileSync(file);
+    if (tamper && name === ASSET) body = Buffer.concat([body, Buffer.from("x")]);
+    res.writeHead(200).end(body);
+  };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://x");
     requests.push({ path: url.pathname, auth: req.headers.authorization ?? null, accept: req.headers.accept });
     let m;
     if ((m = url.pathname.match(/^\/api\/repos\/([^/]+\/[^/]+)\/releases\/(.+)$/))) {
       if (m[1] !== REPO || req.headers.authorization !== `Bearer ${TOKEN}`) return res.writeHead(404).end('{"message":"Not Found"}');
-      const [, , rest] = m;
+      const rest = m[2];
       let a;
       if (rest === "latest") return res.writeHead(200).end(JSON.stringify(releaseJson(latest), null, 2));
       if ((a = rest.match(/^tags\/v(.+)$/)) && VERSIONS.includes(a[1])) return res.writeHead(200).end(JSON.stringify(releaseJson(a[1]), null, 2));
       if ((a = rest.match(/^assets\/(\d+)$/)) && assetById(Number(a[1])) && req.headers.accept === "application/octet-stream") {
         // Like GitHub: a redirect to storage on another host (localhost here), where no token must arrive.
-        return res.writeHead(302, { location: `http://localhost:${server.address().port}/storage/${path.basename(assetById(Number(a[1])))}` }).end();
+        const { v, name } = assetById(Number(a[1]));
+        return res.writeHead(302, { location: `http://localhost:${server.address().port}/storage/${v}/${name}` }).end();
       }
       return res.writeHead(404).end('{"message":"Not Found"}');
     }
-    if ((m = url.pathname.match(/^\/storage\/([^/]+)$/))) {
-      const file = m[1] === "install.sh" ? path.join(root, "install.sh") : path.join(dist, m[1]);
-      return fs.existsSync(file) ? res.writeHead(200).end(fs.readFileSync(file)) : res.writeHead(404).end();
-    }
+    if ((m = url.pathname.match(/^\/storage\/([^/]+)\/([^/]+)$/))) return serve(res, m[1], m[2]);
     if (priv) return res.writeHead(404).end();
-    if (url.pathname === "/releases/latest") {
-      res.writeHead(302, { location: `/releases/tag/v${latest}` }).end();
-    } else if ((m = url.pathname.match(/^\/releases\/latest\/download\/(.+)$/))) {
-      res.writeHead(302, { location: `/releases/download/v${latest}/${m[1]}` }).end();
-    } else if (url.pathname.startsWith("/releases/tag/")) {
-      res.writeHead(200).end("release page");
-    } else if ((m = url.pathname.match(/^\/releases\/download\/v([^/]+)\/([^/]+)$/))) {
-      const file = m[2] === "install.sh" ? path.join(root, "install.sh") : path.join(dist, m[2]);
-      if (!VERSIONS.includes(m[1]) || !fs.existsSync(file)) return res.writeHead(404).end();
-      let body = fs.readFileSync(file);
-      if (tamper && file.endsWith(".tar.gz")) body = Buffer.concat([body, Buffer.from("x")]);
-      res.writeHead(200).end(body);
-    } else res.writeHead(404).end();
+    if (url.pathname === "/releases/latest") res.writeHead(302, { location: `/releases/tag/v${latest}` }).end();
+    else if ((m = url.pathname.match(/^\/releases\/latest\/download\/(.+)$/))) res.writeHead(302, { location: `/releases/download/v${latest}/${m[1]}` }).end();
+    else if (url.pathname.startsWith("/releases/tag/")) res.writeHead(200).end("release page");
+    else if ((m = url.pathname.match(/^\/releases\/download\/v([^/]+)\/([^/]+)$/))) serve(res, m[1], m[2]);
+    else res.writeHead(404).end();
   });
   server.requests = requests;
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
 
-// A fake npm: links this repo's node_modules (offline) and logs how it was called.
-const fakeBin = tmp("overhaul-bin-");
-const npmLog = path.join(fakeBin, "npm.log");
-fs.writeFileSync(path.join(fakeBin, "npm"),
-  `#!/bin/sh\necho "$PWD npm $*" >> '${npmLog}'\nln -sfn '${path.join(root, "node_modules")}' node_modules\n`, { mode: 0o755 });
-
+// Fakes: npm (v0.1's installer runs npm ci: link this repo's node_modules), systemctl, gh.
+const fakeBin = tmp("overhaul-fakes-");
+fs.writeFileSync(path.join(fakeBin, "npm"), `#!/bin/sh\nln -sfn '${path.join(root, "node_modules")}' node_modules\n`, { mode: 0o755 });
+fs.writeFileSync(path.join(fakeBin, "systemctl"), `#!/bin/sh\necho "systemctl $*" >> "$HOME/systemctl.log"\n`, { mode: 0o755 });
 // A fake gh: logged in unless FAKE_GH=logged-out; FAKE_GH=no-access fails like a gh without the repo.
 const ghBin = path.join(fakeBin, "fake-gh");
 const ghLog = path.join(fakeBin, "gh.log");
@@ -99,9 +126,9 @@ case "$1 $2" in
   "release view") [ "\${FAKE_GH:-}" = no-access ] && exit 1; echo v${VERSIONS.at(-1)} ;;
   "release download")
     [ "\${FAKE_GH:-}" = no-access ] && exit 1
-    v=$3; shift 3; pattern=""; dir=.
+    v=\${3#v}; shift 3; pattern=""; dir=.
     while [ $# -gt 0 ]; do case "$1" in --pattern) pattern=$2; shift ;; --dir) dir=$2; shift ;; esac; shift; done
-    cp '${dist}'/"$pattern" "$dir/" ;;
+    case "$pattern" in ${ASSET}|${ASSET}.sha256) cp '${dist}'/"$(echo "$pattern" | sed "s/${ASSET}/${ASSET}-$v/")" "$dir/$pattern" ;; *) cp '${dist}'/"$pattern" "$dir/" ;; esac ;;
   *) exit 1 ;;
 esac
 `, { mode: 0o755 });
@@ -111,9 +138,9 @@ esac
 function testEnv(server, home, extra = {}) {
   const port = server.address().port;
   return {
-    PATH: `${fakeBin}:${process.env.PATH}`, HOME: home, USER: process.env.USER ?? "u",
+    PATH: `${fakeBin}:${process.env.PATH}`, HOME: home, USER: process.env.USER ?? "u", XDG_CONFIG_HOME: path.join(home, ".config"),
     OVERHAUL_RELEASES_URL: `http://127.0.0.1:${port}/releases`, OVERHAUL_API_URL: `http://127.0.0.1:${port}/api`,
-    OVERHAUL_REPO: REPO, OVERHAUL_GH: path.join(fakeBin, "no-gh"), ...extra,
+    OVERHAUL_REPO: REPO, OVERHAUL_GH: path.join(fakeBin, "no-gh"), OVERHAUL_SYSTEMCTL: path.join(fakeBin, "systemctl"), ...extra,
   };
 }
 function runAsync(cmd, args, env, input = "") {
@@ -128,10 +155,10 @@ function runAsync(cmd, args, env, input = "") {
 }
 const runPiped = (server, home, args, shell = "bash", extra = {}) =>
   runAsync(shell, ["-s", "--", ...args], testEnv(server, home, extra), fs.readFileSync(path.join(root, "install.sh")));
-// The installed CLI (app/current/bin/hub.mjs), as `overhaul` would run it.
-const runCli = (server, home, args, extra = {}) =>
-  runAsync(process.execPath, [path.join(home, ".local/bin/overhaul"), ...args], testEnv(server, home, extra));
 const quiet = ["--no-services", "--non-interactive"];
+const binDir = (home) => path.join(home, "bin");
+const installedVersion = (home) => spawnSync(path.join(binDir(home), "overhaul"), ["version"], { encoding: "utf8" }).stdout.trim();
+const calls = (home) => (fs.existsSync(path.join(home, "overhaul-calls.log")) ? fs.readFileSync(path.join(home, "overhaul-calls.log"), "utf8") : "");
 
 test("releaseFiles: runtime files only, no tests, board, node_modules or local layout", () => {
   const files = releaseFiles(["src/server.mjs", "test/a.test.mjs", "kanban/tasks/1.md", "helper/node_modules/x/y.js",
@@ -139,21 +166,20 @@ test("releaseFiles: runtime files only, no tests, board, node_modules or local l
   assert.deepEqual(files, ["helper/install.sh", "install.sh", "package.json", "src/server.mjs"]);
 });
 
-test("release tarball: versioned top folder, RELEASE file, runtime files, matching sha256", () => {
-  const tarball = path.join(dist, tarballName("0.1.0"));
+test("release tarball (for v0.1's updater): versioned top folder, RELEASE, src/server.mjs and install.sh, matching sha256", () => {
+  const tarball = path.join(dist, tarballName("0.2.0"));
   const list = spawnSync("tar", ["-tzf", tarball], { encoding: "utf8" }).stdout.split("\n").filter(Boolean);
-  assert.ok(list.every((f) => f.startsWith("overhaul-v0.1.0/")));
-  const rel = list.map((f) => f.slice("overhaul-v0.1.0/".length));
-  for (const f of ["RELEASE", "install.sh", "package.json", "package-lock.json", "src/server.mjs", "bin/hub.mjs", "public/index.html",
-    "deploy/labels.sh", "deploy/standalone/overhaul.service", "helper/install.sh", "helper/package.json", "pi/overhaul.ts", "config.example.yaml"]) {
+  assert.ok(list.every((f) => f.startsWith("overhaul-v0.2.0/")));
+  const rel = list.map((f) => f.slice("overhaul-v0.2.0/".length));
+  for (const f of ["RELEASE", "install.sh", "package.json", "src/server.mjs", "src/cli.mjs", "bin/overhaul.mjs", "public/index.html", "pi/overhaul.ts", "config.example.yaml"]) {
     assert.ok(rel.includes(f), f);
   }
   assert.ok(!rel.some((f) => /^(test|kanban|scripts|\.github)\//.test(f) || f.includes("node_modules")));
-  assert.equal(fs.readFileSync(`${tarball}.sha256`, "utf8"), `${sha256File(tarball)}  ${tarballName("0.1.0")}\n`);
+  assert.equal(fs.readFileSync(`${tarball}.sha256`, "utf8"), `${sha256File(tarball)}  ${tarballName("0.2.0")}\n`);
   const x = tmp("overhaul-x-");
   spawnSync("tar", ["-xzf", tarball, "-C", x]);
-  assert.equal(fs.readFileSync(path.join(x, "overhaul-v0.1.0/RELEASE"), "utf8"), "0.1.0\n");
-  assert.ok(fs.statSync(path.join(x, "overhaul-v0.1.0/install.sh")).mode & 0o100, "install.sh keeps +x");
+  assert.equal(fs.readFileSync(path.join(x, "overhaul-v0.2.0/RELEASE"), "utf8"), "0.2.0\n");
+  assert.ok(fs.statSync(path.join(x, "overhaul-v0.2.0/install.sh")).mode & 0o100, "install.sh keeps +x");
 });
 
 test("release: version from package.json, tag must match it", () => {
@@ -165,125 +191,124 @@ test("release: version from package.json, tag must match it", () => {
   assert.throws(() => buildRelease({ out, version: "latest" }), /invalid version/);
 });
 
-test("install.sh release mode: --dry-run resolves the latest release and changes nothing", { skip: !hasCurl && "sin curl" }, async () => {
+test("install.sh: --check prints the latest; --dry-run resolves it and changes nothing", { skip: !hasCurl && "sin curl" }, async () => {
   const server = await startServer();
   try {
     const home = tmp("overhaul-home-");
-    const r = await runPiped(server, home, ["--dry-run"]);
+    const c = await runPiped(server, home, ["--check"]);
+    assert.equal(c.status, 0, c.stderr);
+    assert.equal(c.stdout.trim(), "0.3.0");
+    const r = await runPiped(server, home, ["--dry-run", "--bin-dir", binDir(home)]);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /Overhaul v0\.3\.0 desde http:\/\/127\.0\.0\.1:\d+\/releases\n/);
-    assert.match(r.stdout, /\+ descargar .*overhaul-v0\.3\.0\.tar\.gz/);
+    assert.match(r.stdout, new RegExp(`\\+ descargar ${ASSET} y ${ASSET}\\.sha256`));
     assert.deepEqual(fs.readdirSync(home), []);
   } finally { server.close(); }
 });
 
-test("install.sh release mode: curl | sh installs the latest, updates keep one previous, uninstall removes the app", { skip: !hasCurl && "sin curl" }, async () => {
+test("install.sh: curl | sh installs the executable, verified, and sets up ~/.overhaul; reruns replace it in place; uninstall keeps ~/.overhaul", { skip: !hasCurl && "sin curl" }, async () => {
   const server = await startServer();
   try {
     const home = tmp("overhaul-home-");
-    const app = path.join(home, ".local/share/overhaul/app");
-    const cli = path.join(home, ".local/bin/overhaul");
-
+    const bin = path.join(binDir(home), "overhaul");
     // sh hands over to bash by fetching install.sh from releases/latest/download.
-    const r = await runPiped(server, home, quiet, "sh");
+    const r = await runPiped(server, home, [...quiet, "--bin-dir", binDir(home)], "sh");
     assert.equal(r.status, 0, r.stderr + r.stdout);
     assert.match(r.stdout, /sha256 verificado/);
-    assert.equal(fs.readlinkSync(path.join(app, "current")), "0.3.0");
-    assert.equal(fs.readlinkSync(cli), path.join(app, "current/bin/hub.mjs"));
-    assert.equal(fs.readlinkSync(path.join(home, ".local/bin/hub")), path.join(app, "current/bin/hub.mjs"));
-    assert.ok(fs.existsSync(path.join(home, ".config/overhaul/config.yaml")));
-    assert.match(fs.readFileSync(npmLog, "utf8"), new RegExp(`${app}/0\\.3\\.0 npm ci --omit=dev`));
+    assert.equal(installedVersion(home), "0.3.0");
+    assert.match(r.stdout, /no está en tu PATH[\s\S]*export PATH=/);
+    assert.ok(fs.existsSync(path.join(home, ".overhaul/config.yaml")));
+    assert.match(fs.readFileSync(path.join(home, ".overhaul/env"), "utf8"), /^HUB_AGENT_TOKEN=/m);
+    assert.match(calls(home), /^init$/m);
+    assert.match(calls(home), /^migrate$/m); // --no-services: migrate without services
+    assert.match(r.stderr, /sin contraseña/);
+    assert.deepEqual(fs.readdirSync(binDir(home)), ["overhaul"], "no temporary files left");
 
-    // Older versions with --version, then back to the latest: current flips, one previous stays.
-    for (const [args, current, kept] of [
-      [["--version", "0.1.0"], "0.1.0", ["0.1.0", "0.3.0"]],
-      [["--version", "v0.2.0"], "0.2.0", ["0.1.0", "0.2.0"]],
-      [[], "0.3.0", ["0.2.0", "0.3.0"]],
-    ]) {
-      const u = await runPiped(server, home, [...args, ...quiet]);
-      assert.equal(u.status, 0, u.stderr + u.stdout);
-      assert.equal(fs.readlinkSync(path.join(app, "current")), current);
-      assert.deepEqual(fs.readdirSync(app).filter((d) => d !== "current").sort(), kept);
-      assert.match(u.stdout, /ya existe, no la toco/);
-    }
+    // Another version: same path, replaced; config untouched.
+    fs.appendFileSync(path.join(home, ".overhaul/config.yaml"), "# mine\n");
+    const ino = fs.statSync(bin).ino;
+    const old = await runPiped(server, home, ["--version", "v0.1.0", ...quiet, "--bin-dir", binDir(home)]);
+    assert.equal(old.status, 0, old.stderr + old.stdout);
+    assert.equal(installedVersion(home), "0.1.0");
+    assert.notEqual(fs.statSync(bin).ino, ino, "a new file renamed over the old one");
+    assert.match(fs.readFileSync(path.join(home, ".overhaul/config.yaml"), "utf8"), /# mine\n$/);
 
-    const un = await runPiped(server, home, ["--uninstall"]);
+    // OVERHAUL_BIN_DIR does what --bin-dir does.
+    const up = await runPiped(server, home, quiet, "bash", { OVERHAUL_BIN_DIR: binDir(home) });
+    assert.equal(up.status, 0, up.stderr + up.stdout);
+    assert.equal(installedVersion(home), "0.3.0");
+
+    const un = await runPiped(server, home, ["--uninstall", "--bin-dir", binDir(home)]);
     assert.equal(un.status, 0, un.stderr + un.stdout);
-    assert.ok(!fs.existsSync(cli));
-    assert.ok(!fs.existsSync(app));
-    assert.ok(fs.existsSync(path.join(home, ".config/overhaul/config.yaml")));
+    assert.ok(!fs.existsSync(bin));
+    assert.match(calls(home), /^service uninstall$/m);
+    assert.ok(fs.existsSync(path.join(home, ".overhaul/config.yaml")));
   } finally { server.close(); }
 });
 
-test("install.sh release mode: a tarball that fails its sha256 installs nothing", { skip: !hasCurl && "sin curl" }, async () => {
+test("install.sh: an executable that fails its sha256 installs nothing; an unknown version fails cleanly", { skip: !hasCurl && "sin curl" }, async () => {
   const server = await startServer({ tamper: true });
   try {
     const home = tmp("overhaul-home-");
-    const r = await runPiped(server, home, quiet);
+    const r = await runPiped(server, home, [...quiet, "--bin-dir", binDir(home)]);
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /sha256 .* no coincide/);
-    assert.deepEqual(fs.readdirSync(path.join(home, ".local/share/overhaul/app")), []);
-    assert.ok(!fs.existsSync(path.join(home, ".local/bin")));
+    assert.match(r.stderr, /sha256 de overhaul-.* no coincide/);
+    assert.deepEqual(fs.readdirSync(binDir(home)), []);
+    assert.ok(!fs.existsSync(path.join(home, ".overhaul")));
+    const bad = await runPiped(server, home, ["--version", "9.9.9", ...quiet, "--bin-dir", binDir(home)]);
+    assert.notEqual(bad.status, 0);
+    assert.match(bad.stderr, /no pude descargar Overhaul/);
   } finally { server.close(); }
 });
 
-test("install.sh release mode: unknown version fails cleanly; --version is refused from a clone", { skip: !hasCurl && "sin curl" }, async () => {
-  const server = await startServer();
-  try {
-    const home = tmp("overhaul-home-");
-    const r = await runPiped(server, home, ["--version", "9.9.9", ...quiet]);
-    assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /no pude descargar/);
-  } finally { server.close(); }
-  const clone = spawnSync("bash", [path.join(root, "install.sh"), "--version", "0.1.0", "--dry-run"], {
-    env: { PATH: process.env.PATH, HOME: tmp("overhaul-home-"), OVERHAUL_SKIP_NPM: "1" }, encoding: "utf8",
+test("install.sh --binary installs a local executable without downloading", async () => {
+  const home = tmp("overhaul-home-");
+  const r = spawnSync("bash", [path.join(root, "install.sh"), "--binary", path.join(dist, `${ASSET}-0.2.0`), ...quiet, "--bin-dir", binDir(home)], {
+    env: { PATH: process.env.PATH, HOME: home, OVERHAUL_RELEASES_URL: "http://127.0.0.1:9/none" }, encoding: "utf8",
   });
-  assert.notEqual(clone.status, 0);
-  assert.match(clone.stderr, /solo para instalar desde una release/);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(installedVersion(home), "0.2.0");
 });
 
-test("release workflow: tag push, tests first, uploads what install.sh downloads", () => {
+test("release workflow: tag push, tests first, every platform's executable and what v0.1 needs", () => {
   const wf = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+  const contract = JSON.parse(fs.readFileSync(path.join(root, "contract/contract.json"), "utf8"));
   assert.match(wf, /tags: \["v\*\.\*\.\*"\]/);
-  assert.ok(wf.indexOf("npm test") < wf.indexOf("scripts/release.mjs --tag"));
+  assert.ok(wf.indexOf("run: npm test") < wf.indexOf("run: node scripts/build.mjs"));
+  assert.ok(wf.indexOf("run: node scripts/build.mjs") < wf.indexOf("gh release create"));
+  for (const p of contract.release.platforms) {
+    assert.ok(wf.includes(`platform: ${p}`), p);
+    assert.ok(wf.includes(`dist/overhaul-${p} dist/overhaul-${p}.sha256`), p);
+  }
   for (const asset of ['"dist/overhaul-$GITHUB_REF_NAME.tar.gz"', '"dist/overhaul-$GITHUB_REF_NAME.tar.gz.sha256"', "install.sh"]) assert.ok(wf.includes(asset), asset);
+  assert.match(wf, /OVERHAUL_BIN=.*node --test test\/contract\*\.test\.mjs/);
   const sh = fs.readFileSync(path.join(root, "install.sh"), "utf8");
-  assert.match(sh, /REPO="\$\{OVERHAUL_REPO:-[^/]+\/overhaul\}"/);
-  assert.match(sh, /RELEASES_URL="\$\{OVERHAUL_RELEASES_URL:-https:\/\/github\.com\/\$REPO\/releases\}"/);
-  assert.match(sh, /name="overhaul-v\$v\.tar\.gz"/);
+  assert.match(sh, /REPO="\$\{OVERHAUL_REPO:-whitte-h\/overhaul\}"/);
+  assert.ok(sh.includes(contract.release.install_url.replace("https://github.com/whitte-h/overhaul/releases", "")));
+  assert.match(sh, /ASSET="overhaul-\$OS-\$ARCH"/);
 });
 
 test("install.sh private repo: GH_TOKEN goes through the API, assets by id, no token after the redirect", { skip: !hasCurl && "sin curl" }, async () => {
   const server = await startServer({ private: true });
   try {
     const home = tmp("overhaul-home-");
-    const r = await runPiped(server, home, quiet, "bash", { GH_TOKEN: TOKEN });
+    const r = await runPiped(server, home, [...quiet, "--bin-dir", binDir(home)], "bash", { GH_TOKEN: TOKEN });
     assert.equal(r.status, 0, r.stderr + r.stdout);
     assert.match(r.stdout, /Overhaul v0\.3\.0 desde la API de GitHub con token \(acme\/overhaul\)/);
-    assert.match(r.stdout, /sha256 verificado/);
-    assert.equal(fs.readlinkSync(path.join(home, ".local/share/overhaul/app/current")), "0.3.0");
+    assert.equal(installedVersion(home), "0.3.0");
     const assets = server.requests.filter((q) => q.path.includes("/releases/assets/"));
     assert.equal(assets.length, 2);
     assert.ok(assets.every((q) => q.auth === `Bearer ${TOKEN}` && q.accept === "application/octet-stream"));
     const storage = server.requests.filter((q) => q.path.startsWith("/storage/"));
-    assert.deepEqual(storage.map((q) => q.path).sort(), ["/storage/overhaul-v0.3.0.tar.gz", "/storage/overhaul-v0.3.0.tar.gz.sha256"]);
+    assert.deepEqual(storage.map((q) => q.path).sort(), [`/storage/0.3.0/${ASSET}`, `/storage/0.3.0/${ASSET}.sha256`]);
     assert.ok(storage.every((q) => q.auth === null), "the token never reaches storage");
 
-    const v1 = await runPiped(server, home, ["--version", "0.1.0", ...quiet], "bash", { GITHUB_TOKEN: TOKEN });
-    assert.equal(v1.status, 0, v1.stderr + v1.stdout);
-    assert.equal(fs.readlinkSync(path.join(home, ".local/share/overhaul/app/current")), "0.1.0");
-  } finally { server.close(); }
-});
-
-test("install.sh private repo: without gh or a valid token it fails, installing nothing", { skip: !hasCurl && "sin curl" }, async () => {
-  const server = await startServer({ private: true });
-  try {
     for (const extra of [{}, { GH_TOKEN: "wrong" }]) {
-      const home = tmp("overhaul-home-");
-      const r = await runPiped(server, home, quiet, "bash", extra);
-      assert.notEqual(r.status, 0);
-      assert.match(r.stderr, /no pude descargar la release/);
-      assert.ok(!fs.existsSync(path.join(home, ".local/share/overhaul/app/current")));
+      const h = tmp("overhaul-home-");
+      const bad = await runPiped(server, h, [...quiet, "--bin-dir", binDir(h)], "bash", extra);
+      assert.notEqual(bad.status, 0);
+      assert.match(bad.stderr, /no pude descargar Overhaul/);
+      assert.deepEqual(fs.readdirSync(binDir(h)), []);
     }
   } finally { server.close(); }
 });
@@ -293,58 +318,96 @@ test("install.sh private repo: a logged-in gh downloads with gh; one without acc
   try {
     fs.rmSync(ghLog, { force: true });
     const home = tmp("overhaul-home-");
-    const r = await runPiped(server, home, quiet, "bash", { OVERHAUL_GH: ghBin });
+    const r = await runPiped(server, home, [...quiet, "--bin-dir", binDir(home)], "bash", { OVERHAUL_GH: ghBin });
     assert.equal(r.status, 0, r.stderr + r.stdout);
     assert.match(r.stdout, /Overhaul v0\.3\.0 desde gh \(acme\/overhaul\)/);
-    const log = fs.readFileSync(ghLog, "utf8");
-    assert.match(log, /gh release view --repo acme\/overhaul --json tagName/);
-    assert.match(log, /gh release download v0\.3\.0 --repo acme\/overhaul --pattern overhaul-v0\.3\.0\.tar\.gz /);
+    assert.match(fs.readFileSync(ghLog, "utf8"), new RegExp(`gh release download v0\\.3\\.0 --repo acme/overhaul --pattern ${ASSET} `));
     assert.equal(server.requests.length, 0, "nothing over HTTP");
+    assert.equal(installedVersion(home), "0.3.0");
 
-    const noAccess = await runPiped(server, tmp("overhaul-home-"), quiet, "bash", { OVERHAUL_GH: ghBin, FAKE_GH: "no-access", GH_TOKEN: TOKEN });
+    const h2 = tmp("overhaul-home-");
+    const noAccess = await runPiped(server, h2, [...quiet, "--bin-dir", binDir(h2)], "bash", { OVERHAUL_GH: ghBin, FAKE_GH: "no-access", GH_TOKEN: TOKEN });
     assert.equal(noAccess.status, 0, noAccess.stderr + noAccess.stdout);
     assert.match(noAccess.stderr, /gh \(acme\/overhaul\): no encontré la última release/);
     assert.match(noAccess.stdout, /desde la API de GitHub con token/);
-
-    const loggedOut = await runPiped(server, tmp("overhaul-home-"), ["--dry-run"], "bash", { OVERHAUL_GH: ghBin, FAKE_GH: "logged-out", GH_TOKEN: TOKEN });
-    assert.equal(loggedOut.status, 0, loggedOut.stderr);
-    assert.match(loggedOut.stdout, /desde la API de GitHub con token/);
   } finally { server.close(); }
 });
 
-test("overhaul update from a release: --check, update to the latest keeping config, then already up to date", { skip: !hasCurl && "sin curl" }, async () => {
-  const server = await startServer({ private: true });
+test("overhaul update (executable): --check, replace it in place with the latest, then already up to date", { skip: !hasCurl && "sin curl" }, async () => {
+  const server = await startServer();
   try {
     const home = tmp("overhaul-home-");
-    const auth = { GH_TOKEN: TOKEN };
+    assert.equal((await runPiped(server, home, ["--version", "0.1.0", ...quiet, "--bin-dir", binDir(home)])).status, 0);
+    const exe = path.join(binDir(home), "overhaul");
+    const env = testEnv(server, home);
+    // update() blocks on spawnSync, so it runs in a child: this process serves the releases.
+    const lines = [];
+    const upd = async (o) => {
+      const code = `import { update } from ${JSON.stringify(path.join(root, "src/update.mjs"))};
+        import fs from "node:fs";
+        const o = JSON.parse(process.argv[1]);
+        process.exitCode = update({ ...o, installScript: fs.readFileSync(o.installScript), platform: ${JSON.stringify(OS)}, log: (m) => console.log(m) });`;
+      const r = await runAsync(NODE, ["--input-type=module", "-e", code, JSON.stringify({ exe, current: "0.1.0", installScript: path.join(root, "install.sh"), ...o })], env);
+      lines.push(...r.stdout.trim().split("\n"));
+      return r.status;
+    };
+    assert.equal(await upd({ check: true }), 0);
+    assert.match(lines.pop(), /Hay una versión nueva: v0\.3\.0 \(instalada: v0\.1\.0\)/);
+    assert.equal(installedVersion(home), "0.1.0");
+
+    assert.equal(await upd({}), 0, lines.join("\n"));
+    assert.match(lines.join("\n"), /Actualizando v0\.1\.0 → v0\.3\.0/);
+    assert.equal(installedVersion(home), "0.3.0");
+    assert.match(lines.pop(), /Listo: v0\.3\.0/);
+
+    assert.equal(await upd({ current: "0.3.0" }), 0);
+    assert.match(lines.pop(), /Ya tienes la última versión \(v0\.3\.0\)/);
+    assert.equal(await upd({ current: "0.3.0", version: "0.2.0" }), 0);
+    assert.equal(installedVersion(home), "0.2.0");
+
+    // Homebrew's copy is brew's to update.
+    const brewLines = [];
+    assert.equal(update({ exe: "/opt/homebrew/Cellar/overhaul/0.1.0/bin/overhaul", current: "0.1.0", log: (m) => brewLines.push(m), run: () => assert.fail("nothing runs") }), 0);
+    assert.match(brewLines.pop(), /brew upgrade overhaul/);
+  } finally { server.close(); }
+});
+
+test("v0.1 → executable: v0.1's own `overhaul update` installs the binary, repoints links and hooks, removes app/", { skip: (!hasCurl && "sin curl") || (!hasV01 && "sin el commit de v0.1.0 (fetch-depth: 0)") }, async () => {
+  const server = await startServer();
+  try {
+    const home = tmp("overhaul-home-");
+    // v0.1.0 installed the v0.1 way (its own install.sh from its release), with a hook.
+    const v01Script = spawnSync("git", ["-C", root, "show", `${V01}:install.sh`], { encoding: "utf8" }).stdout;
+    // v0.1 links its CLI into ~/.local/bin; OVERHAUL_BIN_DIR is only for the update (v0.1 read it too).
+    const first = await runAsync("bash", ["-s", "--", "--version", "0.1.0", ...quiet], testEnv(server, home), v01Script);
+    const env = testEnv(server, home, { OVERHAUL_BIN_DIR: binDir(home) });
+    assert.equal(first.status, 0, first.stderr + first.stdout);
     const app = path.join(home, ".local/share/overhaul/app");
-    assert.equal((await runPiped(server, home, ["--version", "0.1.0", ...quiet], "bash", auth)).status, 0);
-    const cfgFile = path.join(home, ".config/overhaul/config.yaml");
-    fs.appendFileSync(cfgFile, "# mine\n");
-
-    const check = await runCli(server, home, ["update", "--check"], auth);
-    assert.equal(check.status, 0, check.stderr + check.stdout);
-    assert.match(check.stdout, /Hay una versión nueva: v0\.3\.0 \(instalada: v0\.1\.0\)/);
     assert.equal(fs.readlinkSync(path.join(app, "current")), "0.1.0");
+    assert.equal(fs.readlinkSync(path.join(home, ".local/bin/overhaul")), path.join(app, "current/bin/hub.mjs"));
+    const settings = path.join(home, ".claude/settings.json");
+    fs.mkdirSync(path.dirname(settings), { recursive: true });
+    fs.writeFileSync(settings, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: `${NODE} ${app}/current/bin/hub-hook.mjs`, timeout: 5 }] }] } }));
+    // A port nobody uses: migrate refuses while something answers on the hub's port (7420 may be a real hub).
+    const cfgFile = path.join(home, ".config/overhaul/config.yaml");
+    fs.writeFileSync(cfgFile, `${fs.readFileSync(cfgFile, "utf8").replace(/^port: \d+$/m, "port: 9")}# mine\n`);
 
-    const up = await runCli(server, home, ["update"], auth);
+    // v0.1's CLI updates itself: it downloads v0.3.0's tarball and runs its install.sh.
+    const up = await runAsync(NODE, [path.join(home, ".local/bin/overhaul"), "update"], env);
     assert.equal(up.status, 0, up.stderr + up.stdout);
     assert.match(up.stdout, /Actualizando v0\.1\.0 → v0\.3\.0/);
-    assert.match(up.stdout, /Listo: v0\.3\.0/);
-    assert.equal(fs.readlinkSync(path.join(app, "current")), "0.3.0");
-    assert.match(fs.readFileSync(cfgFile, "utf8"), /# mine\n$/);
-
-    const again = await runCli(server, home, ["update"], auth);
-    assert.equal(again.status, 0, again.stderr + again.stdout);
-    assert.match(again.stdout, /Ya tienes la última versión \(v0\.3\.0\)/);
-    assert.match((await runCli(server, home, ["update", "--check"], auth)).stdout, /Al día: v0\.3\.0/);
-
-    const back = await runCli(server, home, ["update", "--version", "0.2.0"], auth);
-    assert.equal(back.status, 0, back.stderr + back.stdout);
-    assert.equal(fs.readlinkSync(path.join(app, "current")), "0.2.0");
-
-    const noAuth = await runCli(server, home, ["update", "--check"]);
-    assert.notEqual(noAuth.status, 0);
-    assert.match(noAuth.stdout, /no pude consultar la última release/);
+    assert.equal(installedVersion(home), "0.3.0");
+    const bin = path.join(binDir(home), "overhaul");
+    // v0.1's links now lead to the executable; app/ is gone; config and data moved to ~/.overhaul.
+    assert.equal(fs.readlinkSync(path.join(home, ".local/bin/overhaul")), bin);
+    assert.equal(fs.readlinkSync(path.join(home, ".local/bin/hub")), bin);
+    assert.ok(!fs.existsSync(app));
+    assert.match(fs.readFileSync(path.join(home, ".overhaul/config.yaml"), "utf8"), /# mine\n$/);
+    assert.equal(fs.readlinkSync(path.join(home, ".config/overhaul")), path.join(home, ".overhaul"));
+    // The hook runs `overhaul hook Stop` (here the repo's CLI, which the stand-in runs).
+    const cmd = JSON.parse(fs.readFileSync(settings, "utf8")).hooks.Stop[0].hooks[0].command;
+    assert.match(cmd, / hook Stop$/);
+    assert.doesNotMatch(cmd, /hub-hook\.mjs/);
+    assert.match(calls(home), /^install-hooks --repoint-only$/m);
   } finally { server.close(); }
 });

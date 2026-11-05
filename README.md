@@ -2,25 +2,23 @@
 
 Orquestador de agentes por proyecto sobre tmux y Orca, con una capa personal encima de los trackers de cada cliente (Jira, Kaneo, kanban-md): tus tickets abiertos, las preguntas que te hacen los agentes y tus notas privadas. Nada de esto se escribe en el repo ni en el board del cliente. UI en español.
 
-- Hub en `http://127.0.0.1:7420` (servicio de usuario `overhaul`); la contraseña de entrada está en `~/.config/overhaul/env`.
-- Config: `~/.config/overhaul/config.yaml` (config v2, ver [config.example.yaml](config.example.yaml), comentado) y `~/.config/overhaul/env` (tokens, permisos 600).
-- Datos: `~/.local/share/overhaul` (o `data_dir`). Tickets, preguntas, mensajes, notas y agentes en `overhaul.db` (SQLite con `node:sqlite`, Node 22.13 o más nuevo). Si el hub arranca con la base vacía y encuentra los JSON de antes (`tickets/<proyecto>/<KEY>.json`), los importa una vez: copia los JSON a `backups/tickets-json-<fecha>/`, compara cada ticket leído de vuelta y no los borra. Si algo no coincide, no cambia la base y no arranca.
-- CLI: `overhaul` (alias `hub`). Las variables de entorno siguen siendo `HUB_*` (`HUB_PROJECT`, `HUB_TICKET`…); `OVERHAUL_*` sirve como alias.
-- Si solo existen `~/.config/work-hub` y `~/.local/share/work-hub` (instalación de antes del cambio de nombre), se usan esas.
-
+- Un solo ejecutable, `overhaul`, sin Node ni dependencias. Hub en `http://127.0.0.1:7420` (servicio de usuario); todo lo demás en `~/.overhaul` (o `OVERHAUL_HOME`).
+- `~/.overhaul/config.yaml` (config v2, ver [config.example.yaml](config.example.yaml), comentado), `~/.overhaul/env` (contraseña y tokens, permisos 600) y `~/.overhaul/overhaul.db` (SQLite: tickets, preguntas, mensajes, notas y agentes). `data_dir` en config.yaml mueve los datos a otra carpeta. Si el hub arranca con la base vacía y encuentra los JSON de antes (`tickets/<proyecto>/<KEY>.json`), los importa una vez: copia los JSON a `backups/tickets-json-<fecha>/`, compara cada ticket leído de vuelta y no los borra. Si algo no coincide, no cambia la base y no arranca.
+- Las variables de entorno siguen siendo `HUB_*` (`HUB_PROJECT`, `HUB_TICKET`…); `OVERHAUL_*` sirve como alias.
+- Lo que una instalación promete (comando, archivos, servicios, assets de release, API, esquema) está en [docs/contract.md](docs/contract.md). `overhaul paths` dice dónde está todo.
 
 ## Instalar
 
-Overhaul completo en una máquina, Linux o macOS: tablero, preguntas de los agentes (`overhaul ask`) y respuestas que el puente pega en tmux. Todos los proyectos de su `config.yaml` corren ahí (`host` es esa máquina si no lo pones). Otros hosts pueden correr su propio puente (`overhaul bridge --host <nombre>`) contra el mismo hub; el helper de escritorio es opcional.
+Overhaul completo en una máquina, Linux o macOS (arm64 o x64): tablero, preguntas de los agentes (`overhaul ask`) y respuestas que el puente pega en tmux. Todos los proyectos de su `config.yaml` corren ahí (`host` es esa máquina si no lo pones). Otros hosts pueden correr su propio puente (`overhaul bridge --host <nombre>`) contra el mismo hub; el helper de escritorio es opcional.
 
-1. Instala Node 22.13 o más nuevo (con fnm: `brew install fnm` en macOS, `curl -fsSL https://fnm.vercel.app/install | bash` en Linux; luego `fnm install 22 && fnm default 22`), tmux y Claude Code o pi.
-2. Instala desde la última release (sin git ni autenticación):
+1. Instala tmux y Claude Code o pi. Node no hace falta (solo para el helper de escritorio).
+2. Instala desde la última release:
 
    ```bash
    curl -fsSL https://github.com/whitte-h/overhaul/releases/latest/download/install.sh | bash
    ```
 
-   Descarga `overhaul-vX.Y.Z.tar.gz` de GitHub Releases, verifica su `sha256`, lo desempaqueta en `~/.local/share/overhaul/app/<versión>` y apunta `app/current` a esa versión; servicios, CLI y hook usan `app/current`. Opciones con `| bash -s -- <opciones>`, por ejemplo `--version 0.1.0` para una versión concreta. También sirve con `| sh` (le pasa el control a bash). Requiere `curl` y `tar`.
+   Baja `overhaul-<os>-<arch>` de GitHub Releases, verifica su `sha256` y lo deja en `/opt/homebrew/bin` o `/usr/local/bin` si puede escribir ahí; si no, en `~/.overhaul/bin`, y te muestra la línea para agregarlo al `PATH`. Opciones con `| bash -s -- <opciones>`, por ejemplo `--version 0.2.0` o `--bin-dir ~/bin`. También sirve con `| sh`. Requiere `curl`.
 
    Con el repo privado, `releases/latest/download` no responde sin autenticación. Con `gh` con sesión iniciada (`gh auth login`) en una cuenta con acceso:
 
@@ -28,45 +26,52 @@ Overhaul completo en una máquina, Linux o macOS: tablero, preguntas de los agen
    gh release download --repo whitte-h/overhaul --pattern install.sh -O - | bash
    ```
 
-   El instalador elige cómo bajar la release en este orden: `gh` con sesión (`gh release view` / `gh release download`); si no hay, `GH_TOKEN` o `GITHUB_TOKEN` con la API de GitHub (un token con lectura de contenidos del repo; nunca va en la línea de comandos de `curl`); si no, las URLs públicas. Si un camino falla (por ejemplo, `gh` de una cuenta sin acceso), prueba el siguiente. Sin `gh`, con token: `export GH_TOKEN=...` y luego `curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" <URL de la API del asset install.sh> | bash`, o baja `install.sh` de la release a mano y corre `bash install.sh`.
+   El instalador elige cómo bajar en este orden: `gh` con sesión; si no hay, `GH_TOKEN` o `GITHUB_TOKEN` con la API de GitHub (un token con lectura de contenidos del repo; nunca va en la línea de comandos de `curl`); si no, las URLs públicas. Si un camino falla (por ejemplo, `gh` de una cuenta sin acceso), prueba el siguiente.
 
-   O desde un clon (para desarrollar, o con acceso al repo): `git clone https://github.com/whitte-h/overhaul.git && ./overhaul/install.sh`. Instala ese clon tal cual; actualizar es `git pull` y volver a correrlo.
 3. El instalador:
-   - corre `npm ci --omit=dev`;
-   - crea `~/.config/overhaul/config.yaml` (config v2, sin proyectos, solo `127.0.0.1`, sin helper, tu zona horaria) y `env` (permisos 600, con `HUB_AGENT_TOKEN` aleatorio), solo si no existen;
-   - te pide la contraseña del hub (`bin/set-password`);
-   - instala el hub y el puente como servicios de usuario: systemd `overhaul` y `overhaul-bridge` en Linux, LaunchAgents `overhaul.hub` y `overhaul.bridge` en macOS (logs en `~/Library/Logs/overhaul`);
-   - enlaza `overhaul` (y su alias `hub`) en `~/.local/bin`;
-   - pregunta antes de instalar el hook de Claude Code en `~/.claude/settings.json`.
+   - crea `~/.overhaul/config.yaml` (config v2, sin proyectos, solo `127.0.0.1`, sin helper, tu zona horaria) y `env` (permisos 600, con `HUB_AGENT_TOKEN` aleatorio), solo si no existen (`overhaul init`);
+   - te pide la contraseña del hub (`overhaul set-password`);
+   - instala el hub y el puente como servicios de usuario (`overhaul service install`): systemd `overhaul` y `overhaul-bridge` en Linux, LaunchAgents `overhaul.hub` y `overhaul.bridge` en macOS (logs en `~/.overhaul/logs`). Corren el ejecutable: `overhaul serve` y `overhaul bridge`;
+   - pregunta antes de instalar el hook de Claude Code en `~/.claude/settings.json` (`overhaul install-hooks`).
 4. Abre `http://127.0.0.1:7420` y entra con la contraseña.
-5. Agrega un proyecto en `config.yaml` (ver [Agregar un proyecto](#agregar-un-proyecto)) y reinicia: `systemctl --user restart overhaul` en Linux, `launchctl kickstart -k gui/$(id -u)/overhaul.hub` en macOS. Los agentes solo necesitan `HUB_PROJECT` y `HUB_TICKET`: el CLI lee `HUB_AGENT_TOKEN` del `env`, y `HUB_URL` es `http://127.0.0.1:7420` por defecto.
-
-Volver a correr el instalador actualiza dependencias, servicios y enlace sin tocar `config.yaml` ni `env`; desde una release, baja la última (o la de `--version`) y deja la anterior en `app/`. Lo mismo en un comando: `overhaul update`.
+5. Agrega un proyecto en `~/.overhaul/config.yaml` (ver [Agregar un proyecto](#agregar-un-proyecto)) y reinicia: `overhaul service restart`. Los agentes solo necesitan `HUB_PROJECT` y `HUB_TICKET`: el CLI lee `HUB_AGENT_TOKEN` del `env`, y `HUB_URL` es `http://127.0.0.1:7420` por defecto.
 
 Opciones del instalador:
 
 - `--dry-run`: muestra lo que haría, sin cambiar nada.
-- `--uninstall`: quita los servicios y el enlace (y, si instalaste desde una release, `~/.local/share/overhaul/app`). Deja config, datos y hook.
-- `--no-services`: todo menos los servicios. Arranca a mano con `node src/server.mjs` y `overhaul bridge`.
+- `--uninstall`: quita los servicios y el ejecutable. Deja `~/.overhaul` y el hook.
+- `--no-services`: todo menos los servicios. Arranca a mano con `overhaul serve` y `overhaul bridge`.
 - `--non-interactive`: no pregunta nada (ni contraseña ni hook).
+- `--bin-dir D` (o `OVERHAUL_BIN_DIR`): dónde dejar `overhaul`. `--binary FILE`: instala ese ejecutable en vez de bajarlo.
+
+Servicios a mano: `overhaul service status|start|stop|restart|uninstall`. `overhaul service install` es idempotente: reescribe los servicios para que corran este ejecutable.
 
 Detalles:
 
-- **Instalaciones anteriores**: el instalador busca servicios de usuario y LaunchAgents cuyo nombre contenga `work-hub` u `overhaul` y no sean los actuales (work-hub, o un Overhaul con otros nombres). Usan el mismo puerto, así que ofrece detenerlos y quitarlos (sin tocar config ni datos); si dices que no, o sin terminal, no instala, salvo con `--force`. `--uninstall` también los ofrece quitar. Una instalación de work-hub con datos se migra en su lugar (ver abajo).
+- **Instalaciones anteriores**: `overhaul service install` para los servicios que corren, quita los de instalaciones anteriores (servicios de usuario y LaunchAgents cuyo nombre contenga `work-hub` u `overhaul` y no sean los actuales; los del helper no) y reemplaza los de v0.1, que tienen los mismos nombres.
 - **El helper de escritorio** (Orca, perfiles de Chrome, reenvío de puertos, "Abrir aquí" en Consolas) se oculta cuando no responde, y no se intenta sin `helper:` en la config.
-- **Red local de macOS**: no afecta. macOS le bloquea la red local al `node` de Homebrew como LaunchAgent, pero el hub, el puente, el hook y el CLI hablan por `127.0.0.1`, y el loopback está exento. Solo fallaría un tracker en la LAN, por ejemplo un Kaneo en `192.168.x.x`. Jira y los Kaneo públicos van por internet.
+- **Red local de macOS**: el hub, el puente, el hook y el CLI hablan por `127.0.0.1`, que está exento. Solo fallaría un tracker en la LAN, por ejemplo un Kaneo en `192.168.x.x`. Jira y los Kaneo públicos van por internet.
 - **Linux sin sesión abierta**: los servicios de usuario se detienen al cerrar sesión, salvo que actives `loginctl enable-linger $USER`.
-- Los servicios usan el `PATH` de la terminal donde corriste el instalador, para que el puente encuentre `tmux`, `claude`, `pi` y `gh`. Si los instalas después, vuelve a correr `./install.sh`.
+- Los servicios usan el `PATH` de la terminal donde corriste `overhaul service install`, para que el puente encuentre `tmux`, `claude`, `pi` y `gh`. Si los instalas después, vuelve a correrlo.
 
 ### Actualizar
 
 ```bash
-overhaul update           # instala la versión nueva y reinicia hub y puente
+overhaul update           # baja la versión nueva, reemplaza el ejecutable y reinicia hub y puente
 overhaul update --check   # solo dice si hay versión nueva
 ```
 
-- **Desde una release**: consulta la última release con el mismo camino que `install.sh` (`gh` con sesión, `GH_TOKEN`/`GITHUB_TOKEN`, o las URLs públicas) y, si es más nueva que la instalada, la instala con ese mismo flujo (descarga, `sha256`, `app/current`, `npm ci`, servicios reiniciados). `--version X.Y.Z` instala esa versión (también para volver a una anterior). No toca `config.yaml`, `env` ni los datos. Si instalaste con `--no-services`, sigue sin servicios.
-- **Desde un clon**: `git pull --ff-only` en el checkout, `npm ci --omit=dev` si cambió `package-lock.json` y reinicio de hub y puente (systemd o LaunchAgents). Avisa si hay cambios locales; si chocan con lo que llega, el pull falla y no reinicia nada. `--check` hace `git fetch` y cuenta los commits nuevos.
+Consulta la última release con el mismo camino que `install.sh`, baja el ejecutable de tu plataforma, verifica su `sha256`, lo reemplaza en su lugar (un `mv` atómico) y corre `overhaul service install` con el nuevo. `--version X.Y.Z` instala esa versión (también para volver a una anterior). No toca `config.yaml`, `env` ni los datos. Si instalaste con `--no-services`, sigue sin servicios. Instalado con Homebrew: `brew upgrade overhaul`.
+
+### Desde v0.1
+
+v0.1 necesitaba Node y repartía todo entre `~/.config/overhaul`, `~/.local/share/overhaul` y `~/.local/bin`. Para pasar al ejecutable:
+
+- **Instalada desde una release** (`~/.local/share/overhaul/app`): `overhaul update`. Baja la release nueva y su `install.sh` instala el ejecutable, mueve config y datos a `~/.overhaul` (con respaldo), cambia los servicios, el hook, la extensión de pi y los enlaces de `~/.local/bin`, y borra `app/`.
+- **Desde un clon**: corre el instalador (arriba). `overhaul service install` hace la migración.
+- **work-hub** (`~/.config/work-hub`, `~/.local/share/work-hub`, servicios `work-hub*`): igual que un clon. La config v1 sigue funcionando; `overhaul config migrate` la pasa a v2.
+
+La migración (`overhaul migrate`, que `service install` corre sola con los servicios detenidos) respalda todo en `~/.overhaul/backups/migrate-<fecha>/`, mueve las carpetas a `~/.overhaul`, deja enlaces en las rutas viejas (hooks, scripts y otros hosts que las usen siguen funcionando) y quita `data_dir` de config.yaml si apuntaba a una de ellas. Un `~/.overhaul` armado a mano (config, env o base en subcarpetas) se ordena igual. Si encuentra dos instalaciones o dos archivos del mismo tipo, no adivina: avisa y no toca nada. `overhaul migrate --dry-run` muestra el plan. Detalles en [docs/contract.md](docs/contract.md#migración).
 
 ## Agregar un proyecto
 
@@ -119,7 +124,7 @@ Al empezar una tarea el agente corre `overhaul propose "<pregunta 1>" "<pregunta
 2. Si no, en la ventana del orquestador del proyecto (`runtime.orchestrator` en `config.yaml`, ej. `myapp:orq`), que lo atiende o abre un worker con ese nombre.
 3. Si no hay ninguna de las dos, queda en cola hasta que exista.
 
-Cada host con agentes corre un puente: `overhaul-bridge` en la máquina del hub (lo instala `install.sh`), `overhaul bridge --host <nombre>` en los demás. Las instrucciones del hub para un orquestador van en su `CLAUDE.md`.
+Cada host con agentes corre un puente: `overhaul-bridge` en la máquina del hub (lo instala `overhaul service install`), `overhaul bridge --host <nombre>` en los demás. Las instrucciones del hub para un orquestador van en su `CLAUDE.md`.
 
 ## Seguir y manejar agentes desde la página
 
@@ -142,28 +147,20 @@ Para pi: `overhaul install-pi`. Las sesiones ya abiertas toman el hook al reinic
 
 Su layout (URL del hub, orígenes permitidos, carpeta de proyectos de Orca y, por proyecto, host y sesión de tmux) vive en esa máquina, en `~/.config/overhaul/orca-layout.json` (o `OVERHAUL_LAYOUT`). Se genera desde la config del hub con `overhaul orca-layout` (usa `public_url` y `orca.agents_dir`); ejemplo en [helper/orca-layout.example.json](helper/orca-layout.example.json). Instalación: `zsh helper/install.sh` desde un clon, o `zsh ~/.local/share/overhaul/app/current/helper/install.sh` si instalaste desde una release (viene en el mismo tarball, y `install.sh` lo vuelve a correr solo al actualizar). `--dry-run` muestra el plan. Instala los LaunchAgents `overhaul.helper` (el ejecutable `overhaul-helper`, en el puerto 7421) y `overhaul.orca` (restaura el layout de Orca al iniciar sesión), y quita los LaunchAgents de un helper instalado antes con otros nombres o rutas.
 
-## Migrar desde work-hub
-
-Una instalación de antes del cambio de nombre (servicios `work-hub` y `work-hub-bridge`, `~/.config/work-hub`, `~/.local/share/work-hub`) sigue funcionando sin migrar. Para pasarla a Overhaul en su lugar (Linux, systemd de usuario), desde el checkout que quedará en vivo:
-
-```bash
-node deploy/migrate-from-work-hub.mjs --dry-run    # muestra el plan, no cambia nada
-node deploy/migrate-from-work-hub.mjs [--public-url URL1,URL2] [--agents-dir DIR]
-node deploy/migrate-from-work-hub.mjs --rollback   # deshace la última migración
-```
-
-Respalda todo en `~/.local/state/overhaul-migration/<fecha>/`, mueve config y datos dejando symlinks en las rutas viejas, pasa `config.yaml` a v2 sin cambiar el comportamiento (`message_tag: work-hub`), cambia los servicios, arregla hooks con ruta rota, cambia la extensión de pi y comprueba que el hub responda; si no responde, vuelve atrás solo. Las sesiones de tmux, Claude y pi no se tocan. Solo la config: `overhaul config migrate [--dry-run]`.
-
 ## Desarrollo
 
 ```bash
+npm ci
 npm test
-HUB_CONFIG_DIR=/ruta/a/config node src/server.mjs
+OVERHAUL_HOME=/tmp/oh node bin/overhaul.mjs init     # una instalación de prueba aparte
+OVERHAUL_HOME=/tmp/oh node bin/overhaul.mjs serve
+npm run build                                        # dist/overhaul-<os>-<arch> para esta máquina
+OVERHAUL_BIN=dist/overhaul-linux-x64 node --test test/contract*.test.mjs
 ```
+
+`bin/overhaul.mjs` es el mismo CLI que el ejecutable. El ejecutable es Node SEA: [scripts/build.mjs](scripts/build.mjs) arma un solo archivo con esbuild y lo inyecta, con `public/`, el helper, `install.sh` y la extensión de pi como assets, en una copia del Node que lo corre (firmado ad-hoc en macOS). Los tests de contrato son de caja negra: los usará también la versión en Go.
 
 ### Publicar una release
 
 1. Sube `version` en `package.json` (y `package-lock.json`: `npm version X.Y.Z --no-git-tag-version`), commit.
-2. `git tag vX.Y.Z && git push origin vX.Y.Z`. El workflow `.github/workflows/release.yml` corre `npm test`, arma el tarball y crea la release con `overhaul-vX.Y.Z.tar.gz`, su `.sha256` e `install.sh`. Falla si el tag no coincide con la versión.
-
-Para armarlo en local: `npm run release` (deja el tarball y su checksum en `dist/`). Lleva lo necesario para correr (`bin`, `src`, `public`, `deploy`, `helper`, `pi`, `package.json`, `package-lock.json`, `install.sh`, `config.example.yaml`, `README.md` y un archivo `RELEASE` con la versión), sin tests ni tablero.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`. El workflow `.github/workflows/release.yml` corre `npm test`, construye el ejecutable en un runner de cada plataforma (darwin-arm64, darwin-x64, linux-x64, linux-arm64), le corre los tests de contrato y crea la release con `overhaul-<os>-<arch>` y su `.sha256`, `install.sh` y el tarball `overhaul-vX.Y.Z.tar.gz` (lo que baja `overhaul update` de v0.1). Falla si el tag no coincide con la versión.

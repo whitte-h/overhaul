@@ -26,7 +26,7 @@ Hub:
 
 Instalación:
   init                                 crea config.yaml y env en ~/.overhaul si faltan
-  set-password [--no-restart]          contraseña de la página (HUB_TOKEN)
+  set-password [--no-restart|--check]  contraseña de la página (HUB_TOKEN); --check: ¿hay una?
   migrate [--dry-run]                  adopta ~/.config/overhaul, ~/.local/share/overhaul o work-hub
   paths [--json]                       dónde está todo
   install-hooks [--settings F] [--repoint-only]
@@ -317,9 +317,11 @@ async function serviceCli([action, only]) {
 }
 
 async function setPassword() {
-  const { passwordVar, readSecret, validPassword, writePassword } = await import("./password.mjs");
+  const { hasPassword, passwordVar, readSecret, validPassword, writePassword } = await import("./password.mjs");
   const { resolvePaths } = await import("./paths.mjs");
   const P = resolvePaths();
+  // --check: whether there is one (exit 0) or not (1); asks nothing.
+  if (opt.check) process.exit(hasPassword() ? 0 : 1);
   if (!fs.existsSync(P.env)) fail(`No existe ${P.env}: corre ${PROG} init primero`);
   const name = passwordVar();
   const p1 = await readSecret("Nueva contraseña (12+ caracteres): ");
@@ -380,8 +382,8 @@ async function initCommand() {
 
 async function updateCommand() {
   const { update } = await import("./update.mjs");
-  const { sourceRoot } = await import("./self.mjs");
-  process.exit(update({ root: sourceRoot(), check: opt.check, version: opt.version }));
+  const { IS_SEA, sourceRoot } = await import("./self.mjs");
+  process.exit(update({ root: sourceRoot(), exe: IS_SEA ? process.execPath : undefined, current: VERSION, check: opt.check, version: opt.version }));
 }
 
 export function fail(msg) {

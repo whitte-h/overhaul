@@ -1,5 +1,9 @@
 // `overhaul update [--check] [--version X.Y.Z]`: brings this installation to the latest version.
-//   Release (app/<version> with a RELEASE file): asks install.sh for the latest release (same
+//   Executable (the release binary): asks install.sh (carried inside it) for the latest release and
+//   runs it with --bin-dir set to where this executable is: it downloads the new one, checks its
+//   sha256, replaces this file atomically and runs `overhaul service install` with it, which
+//   restarts hub and bridge. Installed by Homebrew: brew upgrade overhaul.
+//   Release (v0.1's app/<version> with a RELEASE file): asks install.sh for the latest release (same
 //   sources: gh, GH_TOKEN/GITHUB_TOKEN, public URLs) and installs it with that same install.sh,
 //   which keeps config and data and restarts hub and bridge.
 //   Clone (.git): git pull --ff-only, npm ci when the lockfile changed, restart hub and bridge.
@@ -8,6 +12,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { assetText } from "./assets.mjs";
+import { isHomebrew } from "./self.mjs";
 
 const HUB_LABEL = "overhaul.hub";
 const BRIDGE_LABEL = "overhaul.bridge";
@@ -136,9 +142,51 @@ function updateClone(ctx, { check, version }) {
   return restartServices(ctx) ? 0 : 1;
 }
 
-export function update({ root, check = false, version, env = process.env, platform = process.platform, log = (m) => console.log(m), run } = {}) {
+function updateBinary(ctx, current, { check, version }) {
+  const { log, exe } = ctx;
+  if (isHomebrew(exe)) {
+    log(check ? "Instalado con Homebrew: brew outdated overhaul" : "Instalado con Homebrew: actualiza con brew upgrade overhaul (y luego overhaul service restart).");
+    return 0;
+  }
+  const script = ctx.installScript ?? assetText("install.sh");
+  const installer = (args, capture) => ctx.run("bash", ["-s", "--", ...args], { input: script, stdio: ["pipe", capture ? "pipe" : "inherit", "inherit"] });
+  let target = version?.replace(/^v/, "");
+  if (!target || check) {
+    const r = installer(["--check"], true);
+    if (r.status !== 0) { log("Error: no pude consultar la última release (ver arriba)."); return 1; }
+    const latest = String(r.stdout).trim().split("\n").pop();
+    if (check) {
+      log(compareVersions(latest, current) > 0 ? `Hay una versión nueva: v${latest} (instalada: v${current}). Actualiza con: overhaul update`
+        : `Al día: v${current} (última release: v${latest}).`);
+      return 0;
+    }
+    target = latest;
+  }
+  if (!version && compareVersions(target, current) <= 0) {
+    log(`Ya tienes la última versión (v${current}).`);
+    return 0;
+  }
+  const dir = path.dirname(exe);
+  try {
+    fs.accessSync(dir, fs.constants.W_OK);
+  } catch {
+    log(`Error: no puedo escribir en ${dir}. Corre sudo overhaul update, o reinstala con install.sh --bin-dir <carpeta tuya>.`);
+    return 1;
+  }
+  log(`Actualizando v${current} → v${target} (${exe})`);
+  const args = ["--version", target, "--non-interactive", "--bin-dir", dir];
+  if (!servicesInstalled(ctx)) args.push("--no-services");
+  const r = installer(args, false);
+  if (r.status !== 0) { log(`Error: la instalación de v${target} falló; sigues en v${current}.`); return 1; }
+  log(`Listo: v${target}. Config y datos intactos.`);
+  return 0;
+}
+
+// exe: this executable when running as one (IS_SEA); then root is meaningless.
+export function update({ root, exe, current, installScript, check = false, version, env = process.env, platform = process.platform, log = (m) => console.log(m), run } = {}) {
   run ??= (cmd, args, opts = {}) => spawnSync(cmd, args, { env, stdio: "inherit", ...opts });
-  const ctx = { root, env, platform, log, run };
+  const ctx = { root, exe, installScript, env, platform, log, run };
+  if (exe) return updateBinary(ctx, current, { check, version });
   const kind = installKind(root);
   if (kind.kind === "release") return updateRelease(ctx, kind.version, { check, version });
   if (kind.kind === "clone") return updateClone(ctx, { check, version });

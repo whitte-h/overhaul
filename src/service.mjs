@@ -252,14 +252,16 @@ export async function repointAgents(ctx) {
 
 export function uninstall(ctx) {
   stopAll(ctx);
+  let removed = 0;
   for (const s of SERVICES) {
     const file = fileOf(ctx, s);
     if (!fs.existsSync(file)) continue;
     if (ctx.platform !== "darwin") exec(ctx, ctx.systemctl, ["--user", "disable", `${s.unit}.service`], { check: false });
     if (!ctx.dryRun) fs.rmSync(file, { force: true });
     ctx.log(`Quité ${file}`);
+    removed++;
   }
-  if (ctx.platform !== "darwin") systemctl(ctx, "daemon-reload");
+  if (removed && ctx.platform !== "darwin") systemctl(ctx, "daemon-reload");
   ctx.log("Config y datos intactos.");
   return 0;
 }
