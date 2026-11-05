@@ -1,15 +1,14 @@
 // Overhaul for pi: tells the hub what this agent was asked and its final reply, like the
-// Claude Code hook does (bin/hub-hook.mjs: UserPromptSubmit, Stop). pi asks no permissions,
-// so there is no PermissionRequest. Installed by `hub install-pi` into ~/.pi/agent/extensions,
-// which fills in the two paths below.
+// Claude Code hook does (`overhaul hook`: UserPromptSubmit, Stop). pi asks no permissions,
+// so there is no PermissionRequest. Installed by `overhaul install-pi` into ~/.pi/agent/extensions,
+// which fills in the command below (the overhaul executable, or node + bin/overhaul.mjs in a clone).
 //
 // Each event runs the hook in its own detached process and is never awaited: a slow or
 // down hub cannot hold up pi's turn. The hook finds the window (tmux pane, or HUB_WINDOW in
 // an Orca terminal) and the token, and does nothing outside an agent the hub tracks.
 import { spawn } from "node:child_process";
 
-const NODE = "__NODE__";
-const HOOK = "__HOOK__";
+const OVERHAUL: string[] = ["__OVERHAUL__"];
 
 function send(event: string, text: string, ctx: any): void {
   if (!text || (!process.env.TMUX_PANE && !process.env.HUB_WINDOW)) return;
@@ -25,7 +24,7 @@ function send(event: string, text: string, ctx: any): void {
     ...(event === "Stop" ? { last_assistant_message: text } : { prompt: text }),
   });
   try {
-    const child = spawn(NODE, [HOOK], { detached: true, stdio: ["pipe", "ignore", "ignore"] });
+    const child = spawn(OVERHAUL[0], [...OVERHAUL.slice(1), "hook", event], { detached: true, stdio: ["pipe", "ignore", "ignore"] });
     child.on("error", () => {});
     child.stdin.on("error", () => {});
     child.stdin.end(input);

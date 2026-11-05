@@ -2,7 +2,6 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { hasDetails, listTickets, ticketDetails } from "./adapters/index.mjs";
 import { Store, httpError } from "./store.mjs";
@@ -16,6 +15,7 @@ import { Activity, promptOptions } from "./activity.mjs";
 import { matchPrs } from "./prs.mjs";
 import { materialize, safeName, withFiles } from "./uploads.mjs";
 import { CONFIG_DIR, ENV_FILE, NAME, localHost } from "./env.mjs";
+import { readAsset } from "./assets.mjs";
 
 const cfg = loadConfig();
 const store = new Store(cfg.dataDir);
@@ -30,7 +30,6 @@ try {
   console.error(`No pude importar los tickets JSON a ${store.file}: ${err.message}. Los JSON siguen intactos; la base no cambió.`);
   process.exit(1);
 }
-const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const TRACKER_TTL_MS = 60_000;
 const MAX_WAIT_S = 50;
 // Attachments you send to agents; kept a month, then removed at startup.
@@ -588,11 +587,12 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", "
 
 function staticFile(res, pathname) {
   // "/" is the full hub; "/p/<project>" the same page locked to one project (used inside Orca).
+  // public/ is read from the executable's assets (or the clone): readAsset refuses ".." and the like.
   const rel = pathname === "/" || /^\/p\/[a-z0-9-]+\/?$/.test(pathname) ? "index.html" : pathname.slice(1);
-  const file = path.join(PUBLIC, path.normalize(rel));
-  if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) throw httpError(404, "Not found");
-  res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream", "cache-control": "no-cache" });
-  fs.createReadStream(file).pipe(res);
+  const bytes = readAsset(`public/${rel}`);
+  if (!bytes) throw httpError(404, "Not found");
+  res.writeHead(200, { "content-type": TYPES[path.extname(rel)] ?? "application/octet-stream", "cache-control": "no-cache" });
+  res.end(bytes);
 }
 
 function send(res, status, data) {

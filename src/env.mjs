@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resolvePaths } from "./paths.mjs";
 
 export const expandHome = (p) => (p && p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p);
 
@@ -14,17 +15,12 @@ for (const [k, v] of Object.entries(process.env)) {
   if (hub && process.env[hub] === undefined) process.env[hub] = v;
 }
 
-// Overhaul's folder, or the one from before the rename (work-hub) while that is the only one.
-// An explicit path always wins.
-export function resolveDir(explicit, fresh, legacy) {
-  if (explicit) return expandHome(explicit);
-  const [f, l] = [expandHome(fresh), expandHome(legacy)];
-  return !fs.existsSync(f) && fs.existsSync(l) ? l : f;
-}
-
-export const CONFIG_DIR = resolveDir(process.env.HUB_CONFIG_DIR, "~/.config/overhaul", "~/.config/work-hub");
-export const defaultDataDir = () => resolveDir(null, "~/.local/share/overhaul", "~/.local/share/work-hub");
-export const ENV_FILE = path.join(CONFIG_DIR, "env");
+// Everything lives in one folder (src/paths.mjs): ~/.overhaul, OVERHAUL_HOME, or an earlier layout
+// until it is migrated.
+export const PATHS = resolvePaths();
+export const CONFIG_DIR = PATHS.configDir;
+export const defaultDataDir = () => PATHS.dataDir;
+export const ENV_FILE = PATHS.env;
 
 // KEY=value lines; values already in the environment win.
 export function loadEnvFile(file = ENV_FILE) {

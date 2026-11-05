@@ -1,0 +1,480 @@
+{
+  "contract": "overhaul",
+  "version": "0.2.0",
+  "command": {
+    "name": "overhaul",
+    "exit": {
+      "ok": 0,
+      "failure": 1,
+      "usage": 2
+    },
+    "subcommands": {
+      "agent": [
+        "ask",
+        "propose",
+        "inbox",
+        "restart"
+      ],
+      "hook": [
+        "hook"
+      ],
+      "runtime": [
+        "serve",
+        "bridge"
+      ],
+      "service": [
+        "service install",
+        "service start",
+        "service stop",
+        "service restart",
+        "service status",
+        "service uninstall"
+      ],
+      "setup": [
+        "init",
+        "set-password",
+        "migrate",
+        "paths",
+        "version",
+        "install-hooks",
+        "install-pi",
+        "helper install",
+        "update"
+      ],
+      "config": [
+        "config migrate",
+        "orca-layout"
+      ]
+    }
+  },
+  "env": {
+    "home": "OVERHAUL_HOME",
+    "aliases": "OVERHAUL_X = HUB_X (HUB_X gana si están las dos)",
+    "agent": [
+      "HUB_PROJECT",
+      "HUB_TICKET",
+      "HUB_AGENT_NAME",
+      "HUB_AGENT_TOKEN",
+      "HUB_URL",
+      "HUB_HOST",
+      "HUB_WINDOW"
+    ],
+    "legacy": [
+      "HUB_CONFIG_DIR",
+      "OVERHAUL_CONFIG_DIR"
+    ]
+  },
+  "layout": {
+    "default_home": "~/.overhaul",
+    "files": {
+      "config": "config.yaml",
+      "env": "env",
+      "db": "overhaul.db",
+      "session_key": "session.key",
+      "ssh_config": "ssh-config",
+      "orca_layout": "orca-layout.json",
+      "setup_ignored": "setup-ignored.json"
+    },
+    "dirs": {
+      "logs": "logs",
+      "bin": "bin",
+      "backups": "backups",
+      "panes": "panes",
+      "uploads": "uploads",
+      "orca_terminals": "orca-terminals",
+      "activity": "activity",
+      "daily": "daily",
+      "helper": "helper"
+    },
+    "modes": {
+      "dir": "0700",
+      "env": "0600",
+      "db": "0600"
+    },
+    "legacy": {
+      "config": [
+        "~/.config/overhaul",
+        "~/.config/work-hub"
+      ],
+      "data": [
+        "~/.local/share/overhaul",
+        "~/.local/share/work-hub"
+      ]
+    }
+  },
+  "paths_json_keys": [
+    "home",
+    "mode",
+    "config",
+    "env",
+    "db",
+    "dataDir",
+    "logs",
+    "bin",
+    "backups"
+  ],
+  "services": {
+    "linux": {
+      "dir": "~/.config/systemd/user",
+      "units": {
+        "overhaul.service": [
+          "serve"
+        ],
+        "overhaul-bridge.service": [
+          "bridge"
+        ]
+      }
+    },
+    "darwin": {
+      "dir": "~/Library/LaunchAgents",
+      "labels": {
+        "overhaul.hub": [
+          "serve"
+        ],
+        "overhaul.bridge": [
+          "bridge"
+        ]
+      },
+      "logs": {
+        "overhaul.hub": "logs/hub.log",
+        "overhaul.bridge": "logs/bridge.log"
+      }
+    },
+    "helper_darwin": {
+      "labels": [
+        "overhaul.helper",
+        "overhaul.orca"
+      ]
+    }
+  },
+  "hook": {
+    "events": [
+      "UserPromptSubmit",
+      "Stop",
+      "PermissionRequest",
+      "Notification"
+    ],
+    "command": "<overhaul> hook <Evento>",
+    "post": "/agent/hook",
+    "payload": [
+      "host",
+      "session",
+      "window",
+      "event",
+      "text",
+      "cwd"
+    ]
+  },
+  "release": {
+    "repo": "whitte-h/overhaul",
+    "tag": "vX.Y.Z",
+    "install_url": "https://github.com/whitte-h/overhaul/releases/latest/download/install.sh",
+    "platforms": [
+      "darwin-arm64",
+      "darwin-x64",
+      "linux-arm64",
+      "linux-x64"
+    ],
+    "binary": "overhaul-{os}-{arch}",
+    "checksum": "overhaul-{os}-{arch}.sha256",
+    "legacy_tarball": "overhaul-v{version}.tar.gz",
+    "assets": [
+      "install.sh",
+      "overhaul-v{version}.tar.gz",
+      "overhaul-v{version}.tar.gz.sha256",
+      "overhaul-{os}-{arch}",
+      "overhaul-{os}-{arch}.sha256",
+      "overhaul.rb"
+    ],
+    "checksum_format": "<sha256 hex>  <file name>\\n"
+  },
+  "http": {
+    "default_port": 7420,
+    "default_bind": "127.0.0.1",
+    "public": [
+      "/login.html",
+      "/style.css"
+    ],
+    "login": "POST /login",
+    "ui_auth": "cookie de sesión + header X-Hub: 1 en métodos que no son GET",
+    "agent_auth": "Authorization: Bearer $HUB_AGENT_TOKEN",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/api/state",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/t/{project}/{key}/answer",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/t/{project}/{key}/status",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/t/{project}/{key}/question",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/t/{project}/{key}/refine",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/t/{project}/{key}/initial/release",
+        "auth": "ui"
+      },
+      {
+        "method": "GET",
+        "path": "/api/t/{project}/{key}/history",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/t/{project}/{key}/message",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/upload",
+        "auth": "ui"
+      },
+      {
+        "method": "GET",
+        "path": "/api/t/{project}/{key}/details",
+        "auth": "ui"
+      },
+      {
+        "method": "GET",
+        "path": "/api/consoles",
+        "auth": "ui"
+      },
+      {
+        "method": "PUT",
+        "path": "/api/t/{project}/{key}/notes",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/setup/answer",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/setup/ignore",
+        "auth": "ui"
+      },
+      {
+        "method": "GET",
+        "path": "/api/daily/{project}",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/daily/{project}",
+        "auth": "ui"
+      },
+      {
+        "method": "GET",
+        "path": "/api/t/{project}/{key}/pane",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/t/{project}/{key}/launch",
+        "auth": "ui"
+      },
+      {
+        "method": "GET",
+        "path": "/api/activity",
+        "auth": "ui"
+      },
+      {
+        "method": "GET",
+        "path": "/api/screen",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/window/send",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/window/input",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/window/close",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/window/restart",
+        "auth": "ui"
+      },
+      {
+        "method": "POST",
+        "path": "/api/window/keys",
+        "auth": "ui"
+      },
+      {
+        "method": "GET",
+        "path": "/agent/bridge/pending",
+        "auth": "agent"
+      },
+      {
+        "method": "POST",
+        "path": "/agent/bridge/status",
+        "auth": "agent"
+      },
+      {
+        "method": "POST",
+        "path": "/agent/bridge/prs",
+        "auth": "agent"
+      },
+      {
+        "method": "POST",
+        "path": "/agent/bridge/screen",
+        "auth": "agent"
+      },
+      {
+        "method": "POST",
+        "path": "/agent/bridge/ack-actions",
+        "auth": "agent"
+      },
+      {
+        "method": "POST",
+        "path": "/agent/bridge/ack",
+        "auth": "agent"
+      },
+      {
+        "method": "POST",
+        "path": "/agent/hook",
+        "auth": "agent"
+      },
+      {
+        "method": "GET",
+        "path": "/agent/upload/{uuid}",
+        "auth": "agent"
+      },
+      {
+        "method": "POST",
+        "path": "/agent/{project}/{key}/ask",
+        "auth": "agent"
+      },
+      {
+        "method": "POST",
+        "path": "/agent/{project}/{key}/propose",
+        "auth": "agent"
+      },
+      {
+        "method": "GET",
+        "path": "/agent/{project}/{key}/inbox",
+        "auth": "agent"
+      }
+    ]
+  },
+  "sqlite": {
+    "schema_version": 1,
+    "tables": {
+      "agents": [
+        "id",
+        "project_id",
+        "task_id",
+        "name",
+        "role",
+        "runtime",
+        "host",
+        "tmux_pane",
+        "last_seen",
+        "extra",
+        "created_at",
+        "updated_at"
+      ],
+      "messages": [
+        "id",
+        "task_id",
+        "kind",
+        "question_id",
+        "question_text",
+        "text",
+        "attachments",
+        "consumed_at",
+        "via",
+        "extra",
+        "created_at",
+        "updated_at"
+      ],
+      "meta": [
+        "key",
+        "value"
+      ],
+      "notes": [
+        "id",
+        "task_id",
+        "body",
+        "created_at",
+        "updated_at"
+      ],
+      "projects": [
+        "id",
+        "key",
+        "created_at",
+        "updated_at"
+      ],
+      "question_events": [
+        "id",
+        "question_id",
+        "type",
+        "from_status",
+        "to_status",
+        "actor",
+        "data",
+        "created_at",
+        "updated_at"
+      ],
+      "questions": [
+        "id",
+        "task_id",
+        "text",
+        "asked_by",
+        "blocks",
+        "status",
+        "answer",
+        "answered_at",
+        "refines_id",
+        "kind",
+        "extra",
+        "created_at",
+        "updated_at"
+      ],
+      "schema_migrations": [
+        "version",
+        "applied_at"
+      ],
+      "tasks": [
+        "id",
+        "project_id",
+        "key",
+        "auto",
+        "extra",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "indexes": [
+      "messages_pending",
+      "messages_task",
+      "question_events_question",
+      "questions_status",
+      "questions_task"
+    ]
+  }
+}

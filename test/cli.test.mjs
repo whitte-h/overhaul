@@ -43,17 +43,24 @@ test("install-pi installs overhaul.ts and moves the old work-hub.ts out", () => 
   const ext = path.join(tmp("overhaul-pi-"), "extensions");
   fs.mkdirSync(ext);
   fs.writeFileSync(path.join(ext, "work-hub.ts"), "old");
-  const r = cli(["install-pi", "--dir", ext, "--node", "/n/node"]);
+  const r = cli(["install-pi", "--dir", ext]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(fs.readdirSync(ext), ["overhaul.ts"]);
-  assert.match(fs.readFileSync(path.join(ext, "overhaul.ts"), "utf8"), /"\/n\/node"/);
+  // From a clone the extension runs node + bin/overhaul.mjs hook; the executable runs itself.
+  const text = fs.readFileSync(path.join(ext, "overhaul.ts"), "utf8");
+  const cmd = JSON.parse(text.match(/const OVERHAUL: string\[\] = (\[.*\]);/)[1]);
+  assert.deepEqual(cmd.slice(1), [path.join(root, "bin/overhaul.mjs")]);
+  assert.doesNotMatch(text, /__OVERHAUL__/);
   assert.equal(fs.readdirSync(path.dirname(ext)).filter((f) => f.startsWith("work-hub.ts.bak-")).length, 1);
-  assert.match(cli(["install-pi", "--dir", ext, "--node", "/n/node"]).stdout, /already installed/);
+  assert.match(cli(["install-pi", "--dir", ext]).stdout, /already installed/);
 });
 
 test("usage names the command it was run as", () => {
-  assert.match(cli(["nope"]).stderr, /Usage: hub ask/);
-  assert.match(cli(["nope"]).stderr, /hub propose "q1"/);
+  const r = cli(["nope"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /Comando desconocido: nope/);
+  assert.match(r.stderr, /Usage: hub <comando> \(hub help\)/);
+  assert.match(cli(["propose"], { HUB_PROJECT: "a", HUB_TICKET: "B-1", HUB_AGENT_TOKEN: "x".repeat(24) }).stderr, /^Usage: hub propose/);
 });
 
 test("worker intro asks for initial questions with overhaul propose, with or without a project prompt", async () => {
