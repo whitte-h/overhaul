@@ -13,7 +13,8 @@
   "scripts": {
     "start": "node src/server.mjs",
     "test": "node --test test/*.test.mjs",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "build": "node scripts/build.mjs"
   },
   "dependencies": {
     "yaml": "2.9.1"

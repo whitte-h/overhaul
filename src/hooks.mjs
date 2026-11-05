@@ -8,8 +8,12 @@ import { shellLine } from "./self.mjs";
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, "-");
 
-// Ours: v0.1's `node …/hub-hook.mjs` and v0.2's `… overhaul hook [Event]` (any path, quoted or not).
-export const isOurHook = (cmd) => /hub-hook\.mjs\b/.test(cmd) || /(^|[\s/'"])overhaul(\.mjs)?['"]?\s+hook(\s|$)/.test(cmd);
+// Ours: v0.1's `node …/hub-hook.mjs` and v0.2's `… overhaul hook [Event]` (any path, quoted or not,
+// overhaul-<os>-<arch> too), or exactly this program's command.
+export const isOurHook = (cmd, self) =>
+  /hub-hook\.mjs\b/.test(cmd) ||
+  /(^|[\s/'"])overhaul[\w.-]*['"]?\s+hook(\s|$)/.test(cmd) ||
+  Boolean(self && cmd.startsWith(`${shellLine(self)} hook`));
 
 export const hookCommand = (self, event) => shellLine([...self, "hook", event]);
 
@@ -24,7 +28,7 @@ export function installHooks({ self, files, repointOnly = false }) {
     for (const event of HOOK_EVENTS) {
       const want = hookCommand(self, event);
       const groups = hooks[event] ?? [];
-      const ours = groups.flatMap((g) => g.hooks ?? []).filter((h) => isOurHook(String(h.command ?? "")));
+      const ours = groups.flatMap((g) => g.hooks ?? []).filter((h) => isOurHook(String(h.command ?? ""), self));
       if (ours.length) {
         for (const h of ours) {
           if (h.command === want) continue;
