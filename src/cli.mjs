@@ -103,6 +103,9 @@ const COMMANDS = {
   },
   "install-pi": installPi,
   paths: pathsCommand,
+  service: serviceCli,
+  "set-password": setPassword,
+  "install-hooks": installHooksCommand,
   migrate: migrateCommand,
   init: initCommand,
   config: configCommand,
@@ -301,6 +304,48 @@ async function orcaLayoutCommand() {
   // Without public_url the hub link is this machine's loopback: wrong on the helper's machine.
   if (!cfg.publicUrls.some((u) => !/\/\/(127\.0\.0\.1|localhost)[:/]?/.test(u))) console.error("aviso: config.yaml no tiene public_url; el layout apunta a 127.0.0.1, que solo sirve si el helper corre en esta misma máquina");
   console.log(JSON.stringify(orcaLayout(cfg), null, 2));
+  process.exit(0);
+}
+
+async function serviceCli([action, only]) {
+  const { context, serviceCommand } = await import("./service.mjs");
+  if (only && !["hub", "bridge"].includes(only)) fail(`Usage: ${PROG} service install|start|stop|restart|status|uninstall [hub|bridge] [--dry-run]`);
+  const ctx = context({ self: selfCommand(), dryRun: opt["dry-run"] });
+  const code = await serviceCommand(action, ctx, only);
+  if (code === null) fail(`Usage: ${PROG} service install|start|stop|restart|status|uninstall [hub|bridge] [--dry-run]`);
+  process.exit(code);
+}
+
+async function setPassword() {
+  const { passwordVar, readSecret, validPassword, writePassword } = await import("./password.mjs");
+  const { resolvePaths } = await import("./paths.mjs");
+  const P = resolvePaths();
+  if (!fs.existsSync(P.env)) fail(`No existe ${P.env}: corre ${PROG} init primero`);
+  const name = passwordVar();
+  const p1 = await readSecret("Nueva contraseña (12+ caracteres): ");
+  const p2 = await readSecret("Repítela: ");
+  if (p1 !== p2) fail("No coinciden; no cambié nada.");
+  const bad = validPassword(p1);
+  if (bad) fail(`${bad} No cambié nada.`);
+  writePassword(P.env, name, p1);
+  if (opt["no-restart"]) {
+    console.log(`Contraseña guardada en ${P.env}.`);
+    process.exit(0);
+  }
+  const { context, control, installed } = await import("./service.mjs");
+  const ctx = context({ self: selfCommand() });
+  if (!installed(ctx)) console.log(`Contraseña guardada en ${P.env}. Reinicia el hub para que la tome.`);
+  else if (control(ctx, "restart", "hub") === 0) console.log("Listo. Entra de nuevo en el hub con la contraseña nueva (se cerraron las sesiones abiertas).");
+  else console.log(`Contraseña guardada en ${P.env}, pero no pude reiniciar el hub: ${PROG} service restart hub`);
+  process.exit(0);
+}
+
+async function installHooksCommand() {
+  const { installHooks } = await import("./hooks.mjs");
+  const files = opt.settings?.length ? opt.settings : [path.join(os.homedir(), ".claude/settings.json")];
+  for (const r of installHooks({ self: selfCommand(), files, repointOnly: opt["repoint-only"] })) {
+    console.log(`${r.file}: ${r.changed.length ? `changed ${r.changed.join(", ")}` : "already installed"}`);
+  }
   process.exit(0);
 }
 
