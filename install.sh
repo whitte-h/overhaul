@@ -261,27 +261,38 @@ else
   say "+ mv <descarga> $BIN"
 fi
 
-# --- PATH -------------------------------------------------------------------------------------------
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *)
-    rc="$HOME/.bashrc"
-    case "${SHELL:-}" in */zsh) rc="$HOME/.zshrc" ;; esac
-    say ""
-    say "$BIN_DIR no está en tu PATH. Agrega esta línea a $rc y abre una terminal nueva:"
-    say "  export PATH=\"$BIN_DIR:\$PATH\""
-    say ""
-    ;;
-esac
-
 # v0.1 left `overhaul` and `hub` in ~/.local/bin as links to a .mjs: they would shadow this one.
+# With --bin-dir ~/.local/bin the executable itself is ~/.local/bin/overhaul: no link to itself.
+linked_dirs=":"
 for link in "$HOME/.local/bin/overhaul" "$HOME/.local/bin/hub"; do
-  if [ -L "$link" ]; then
-    case "$(readlink "$link")" in
-      *.mjs) run ln -sfn "$BIN" "$link"; say "$link -> $BIN (antes apuntaba a v0.1)" ;;
-    esac
-  fi
+  [ "$link" != "$BIN" ] || continue
+  [ -L "$link" ] || continue
+  to=$(readlink "$link")
+  case "$to" in
+    *.mjs) run ln -sfn "$BIN" "$link"; say "$link -> $BIN (antes apuntaba a v0.1)"; to=$BIN ;;
+  esac
+  if [ "$to" = "$BIN" ] && [ "$(basename "$link")" = overhaul ]; then linked_dirs="$linked_dirs$(dirname "$link"):"; fi
 done
+
+# --- PATH -------------------------------------------------------------------------------------------
+# Fine when BIN_DIR is in the PATH, or a link named overhaul in a PATH folder leads to $BIN.
+in_path=0
+case ":$PATH:" in *":$BIN_DIR:"*) in_path=1 ;; esac
+if [ "$in_path" = 0 ]; then
+  old_ifs=$IFS; IFS=:
+  for d in $PATH; do
+    case "$linked_dirs" in *":$d:"*) in_path=1 ;; esac
+  done
+  IFS=$old_ifs
+fi
+if [ "$in_path" = 0 ]; then
+  rc="$HOME/.bashrc"
+  case "${SHELL:-}" in */zsh) rc="$HOME/.zshrc" ;; esac
+  say ""
+  say "$BIN_DIR no está en tu PATH. Agrega esta línea a $rc y abre una terminal nueva:"
+  say "  export PATH=\"$BIN_DIR:\$PATH\""
+  say ""
+fi
 
 if [ "$dry" = 1 ]; then
   say "+ $BIN init"

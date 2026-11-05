@@ -270,6 +270,43 @@ test("install.sh --binary installs a local executable without downloading", asyn
   assert.equal(installedVersion(home), "0.2.0");
 });
 
+// OVH-46: --bin-dir ~/.local/bin on a v0.1 machine, where ~/.local/bin/overhaul is v0.1's link.
+test("install.sh: --bin-dir equal to v0.1's link replaces the link with the executable, never a link to itself", () => {
+  const home = tmp("overhaul-home-");
+  const local = path.join(home, ".local/bin");
+  fs.mkdirSync(local, { recursive: true });
+  fs.symlinkSync(path.join(home, ".overhaul/app/current/bin/hub.mjs"), path.join(local, "overhaul"));
+  fs.symlinkSync(path.join(home, ".overhaul/app/current/bin/hub.mjs"), path.join(local, "hub"));
+  const env = { PATH: process.env.PATH, HOME: home, OVERHAUL_RELEASES_URL: "http://127.0.0.1:9/none" };
+  const args = [path.join(root, "install.sh"), "--binary", path.join(dist, `${ASSET}-0.2.0`), ...quiet, "--bin-dir", local];
+  const dry = spawnSync("bash", [...args, "--dry-run"], { env, encoding: "utf8" });
+  assert.equal(dry.status, 0, dry.stderr + dry.stdout);
+  assert.doesNotMatch(dry.stdout, new RegExp(`ln -sfn ${local}/overhaul ${local}/overhaul`));
+  assert.match(dry.stdout, new RegExp(`ln -sfn ${local}/overhaul ${local}/hub`));
+  const r = spawnSync("bash", args, { env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const bin = path.join(local, "overhaul");
+  assert.ok(!fs.lstatSync(bin).isSymbolicLink(), "the executable, not a link");
+  assert.equal(spawnSync(bin, ["version"], { encoding: "utf8" }).stdout.trim(), "0.2.0");
+  assert.equal(fs.readlinkSync(path.join(local, "hub")), bin);
+});
+
+test("install.sh: no PATH warning when a link in a PATH folder already leads to the executable", () => {
+  const home = tmp("overhaul-home-");
+  const local = path.join(home, ".local/bin");
+  fs.mkdirSync(local, { recursive: true });
+  fs.symlinkSync(path.join(home, "old/bin/hub.mjs"), path.join(local, "overhaul"));
+  const run = (extraPath) => spawnSync("bash", [path.join(root, "install.sh"), "--binary", path.join(dist, `${ASSET}-0.2.0`), ...quiet, "--bin-dir", binDir(home)], {
+    env: { PATH: `${extraPath}${process.env.PATH}`, HOME: home, OVERHAUL_RELEASES_URL: "http://127.0.0.1:9/none" }, encoding: "utf8",
+  });
+  const r = run(`${local}:`);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(fs.readlinkSync(path.join(local, "overhaul")), path.join(binDir(home), "overhaul"));
+  assert.doesNotMatch(r.stdout, /no está en tu PATH/);
+  // Without ~/.local/bin in the PATH the warning is still there.
+  assert.match(run("").stdout, /no está en tu PATH/);
+});
+
 test("release workflow: tag push, tests first, every platform's executable and what v0.1 needs", () => {
   const wf = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
   const contract = JSON.parse(fs.readFileSync(path.join(root, "contract/contract.json"), "utf8"));

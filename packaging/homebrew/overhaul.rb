@@ -1,5 +1,5 @@
 # Homebrew formula for Overhaul (tap: whitte-h/tap, `brew install whitte-h/tap/overhaul`).
-# Template: scripts/homebrew.mjs fills {{VERSION}} and each executable's sha256 from a release's
+# Template: scripts/homebrew.mjs fills in the version and each executable's sha256 from a release's
 # .sha256 files; the release workflow attaches the result (overhaul.rb) and, with a tap token,
 # commits it to the tap as Formula/overhaul.rb.
 class Overhaul < Formula

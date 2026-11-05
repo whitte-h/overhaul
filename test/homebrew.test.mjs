@@ -19,6 +19,8 @@ test("formula: version, each platform's URL and sha256, binary installed as over
   assert.match(rb, /^class Overhaul < Formula$/m);
   assert.match(rb, /^  version "1\.2\.3"$/m);
   assert.doesNotMatch(rb, /\{\{/);
+  // The header comment is the same in every release: no placeholder there to fill.
+  assert.doesNotMatch(rb.slice(0, rb.indexOf("class Overhaul")), /1\.2\.3|VERSION/);
   for (const p of contract.release.platforms) {
     const [o, a] = p.split("-");
     const url = `https://github.com/${contract.release.repo}/releases/download/v1.2.3/${contract.release.binary.replace("{os}", o).replace("{arch}", a)}`;
