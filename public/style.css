@@ -194,3 +194,5 @@ button.danger { color: var(--danger); }
 
 /* No desktop helper here (phone, hub without `helper`): nothing that needs it. */
 .no-helper .follow { display: none; }
+/* Unless this hub has Orca terminals in its own Orca (standalone): it follows without the helper. */
+.no-helper.orca-here .follow { display: revert; }

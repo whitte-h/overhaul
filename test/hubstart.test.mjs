@@ -117,3 +117,51 @@ test("hub imports JSON tickets on its first start, keeps the JSON, then serves a
     ["¿Hay diseño en Figma?", "open", "initial", ""],
   ]);
 });
+
+// Standalone with Orca (OVH-15): the hub finds the ticket's terminal in its own Orca and switches
+// there; Orca here has a window, so the page needs no helper. A fake `orca` CLI (ORCA_BIN) logs.
+test("follow in Orca, standalone: the hub switches its own Orca to the ticket's terminal", async () => {
+  const port = await freePort();
+  const home = fakeHome(port);
+  const repo = path.join(home, "code/solo");
+  fs.mkdirSync(path.join(repo, ".git"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".config/overhaul/config.yaml"),
+    `version: 2\nport: ${port}\nbind: [127.0.0.1]\nprojects:\n  alpha:\n    repo: ${repo}\n    runtime: { dir: ${repo}, terminal: orca }\n`);
+  const log = path.join(home, "orca.log");
+  const bin = path.join(home, "orca");
+  fs.writeFileSync(bin, `#!${process.execPath}
+const fs = require("fs");
+const a = process.argv.slice(2).filter((x) => x !== "--json");
+fs.appendFileSync(${JSON.stringify(log)}, a.join(" ") + "\\n");
+const ok = (result) => { console.log(JSON.stringify({ ok: true, result })); process.exit(0); };
+if (a[0] === "status") ok({ runtime: { reachable: true, runtimeId: "rt-here" } });
+if (a[0] === "terminal" && a[1] === "list") ok({ terminals: [{ handle: "term_abc", title: "abc-1", writable: true, tabId: "t", leafId: "l" }] });
+if (a[0] === "terminal" && a[1] === "switch") ok({ focus: { handle: a[3], navigated: true } });
+ok({});
+`, { mode: 0o755 });
+  const hubEnv = { ...env(home, port), ORCA_BIN: bin };
+  const child = spawn(process.execPath, [path.join(root, "src/server.mjs")], { env: hubEnv, stdio: ["ignore", "pipe", "pipe"] });
+  let out = "";
+  child.stdout.on("data", (d) => (out += d));
+  child.stderr.on("data", (d) => (out += d));
+  try {
+    const deadline = Date.now() + 10_000;
+    while (!/on http:\/\//.test(out)) {
+      if (child.exitCode !== null || Date.now() > deadline) throw new Error(`hub did not start:\n${out}`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const base = `http://127.0.0.1:${port}`;
+    const login = await fetch(`${base}/login`, { method: "POST", body: "token=a-long-ui-password", headers: { "content-type": "application/x-www-form-urlencoded" }, redirect: "manual" });
+    const cookie = login.headers.get("set-cookie").split(";")[0];
+    const res = await fetch(`${base}/api/orca/alpha/focus`, { method: "POST", headers: { cookie, "x-hub": "1", "content-type": "application/json" }, body: JSON.stringify({ key: "ABC-1" }) });
+    const body = await res.json();
+    assert.equal(res.status, 200, JSON.stringify(body) + out);
+    assert.deepEqual(body, { runtimeId: "rt-here", handle: "term_abc", state: "existing", navigated: true });
+    assert.match(fs.readFileSync(log, "utf8"), /^terminal switch --terminal term_abc$/m);
+    const state = await (await fetch(`${base}/api/state`, { headers: { cookie } })).json();
+    assert.equal(state.orcaHere, true);
+    assert.equal(state.projects[0].orcaLocal, true);
+  } finally {
+    await new Promise((r) => { child.on("exit", r); child.kill(); });
+  }
+});

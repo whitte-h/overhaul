@@ -53,6 +53,7 @@ async function load(refresh) {
     lastRender = Date.now();
     data = next;
     if (!data.chromeHelper) document.documentElement.classList.add("no-helper");
+    document.documentElement.classList.toggle("orca-here", !!data.orcaHere);
     probeHelper();
     render();
   } catch (err) {
@@ -314,7 +315,7 @@ function projectAgentPanel(p) {
         h("div", { class: "meta", title: "create_tickets en la config del proyecto" }, p.createTickets ? "Puede crear tickets" : "No crea tickets"),
         w.state === "working" && w.line && h("div", { class: "meta" }, w.line),
         h("div", { class: "actions" }, orcaButton(p, w), restartButton(w)),
-        helperUp && h("div", { class: "actions" }, h("button", { title: "Abre en Orca todas las ventanas de agentes del proyecto", onclick: () => reopenAll(p) }, "Reabrir terminales")),
+        (helperUp || p.orcaLocal) && h("div", { class: "actions" }, h("button", { title: "Abre en Orca todas las ventanas de agentes del proyecto", onclick: () => reopenAll(p) }, "Reabrir terminales")),
       ),
       devServersSection(p),
       setupSection(p),
@@ -363,6 +364,7 @@ function probeHelper() {
 }
 
 async function openInOrca(p, w, quiet = false) {
+  if (p.terminal === "orca") return focusInOrca(p, w.name === p.orchestrator ? null : shortName(w), quiet);
   if (!helperUp) return;
   try {
     const res = await fetch(`${data.chromeHelper}/terminal?${new URLSearchParams({ project: p.id, host: w.host, win: w.name })}`, { method: "POST" });
@@ -372,17 +374,39 @@ async function openInOrca(p, w, quiet = false) {
   }
 }
 
+// Projects with Orca terminals: the hub finds or creates the terminal (orchestrator with key null)
+// in its own Orca and switches to it. That Orca has a window when it runs on the same machine
+// (standalone); a server's has none, and the helper switches the Orca on this computer, paired
+// with it.
+async function focusInOrca(p, key, quiet = false) {
+  if (!p.orcaLocal && !helperUp) return false;
+  try {
+    const { runtimeId, handle, navigated } = await api("POST", `/api/orca/${encodeURIComponent(p.id)}/focus`, { key });
+    if (navigated) return true;
+    if (!helperUp) throw new Error("el Orca del hub no tiene ventana; ábrelo desde el Orca de tu escritorio (helper de Overhaul)");
+    const res = await fetch(`${data.chromeHelper}/orca/switch?${new URLSearchParams({ runtimeId: runtimeId ?? "", handle })}`, { method: "POST" });
+    if (!res.ok) throw new Error(await res.text());
+    return true;
+  } catch (e) {
+    if (!quiet) toast(`No pude abrir la terminal en Orca: ${e.message}`);
+    return false;
+  }
+}
+
 function followInOrca(id) {
   const p = data.projects.find((x) => x.id === filter) ?? data.projects.find((x) => id.startsWith(`${x.id}/`));
   if (!p) return;
-  const w = id === CHAT ? orchestratorWindow(p) : ticketWindows(p, p.tickets.find((t) => tid(p, t) === id) ?? { key: "" })[0];
+  const t = id === CHAT ? null : p.tickets.find((x) => tid(p, x) === id);
+  if (p.terminal === "orca") return focusInOrca(p, t?.key ?? null, true);
+  const w = id === CHAT ? orchestratorWindow(p) : ticketWindows(p, t ?? { key: "" })[0];
   if (w) openInOrca(p, w, true);
 }
 
-const orcaButton = (p, w) => helperUp && h("button", { title: "Terminal real en Orca (necesita el helper de Overhaul)", onclick: () => openInOrca(p, w) }, "Abrir en Orca");
+const orcaButton = (p, w) => (helperUp || p.orcaLocal) && h("button", { title: "Terminal real en Orca (necesita el helper de Overhaul)", onclick: () => openInOrca(p, w) }, "Abrir en Orca");
 
 // Rebuilds the project in Orca (hub tab and every agent terminal), e.g. after Orca restarted.
 async function reopenAll(p) {
+  if (p.terminal === "orca") return focusInOrca(p, null).then((ok) => ok && toast(`${p.name} restaurado en Orca`));
   try {
     const res = await fetch(`${data.chromeHelper}/orca/restore?${new URLSearchParams({ project: p.id })}`, { method: "POST" });
     if (!res.ok) throw new Error(await res.text());

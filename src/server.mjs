@@ -187,6 +187,9 @@ async function state(refresh) {
         links: p.links,
         trackerType: p.tracker?.type,
         orchestrator: p.orchestrator ?? null,
+        terminal: p.terminals?.type ?? "tmux",
+        // Orca terminals in this hub's own Orca: "follow in Orca" works without the helper.
+        orcaLocal: p.terminals?.type === "orca" && p.host === localHost(),
         createTickets: p.createTickets,
         error,
         bridge: bridgeUp(p.host),
@@ -197,7 +200,7 @@ async function state(refresh) {
       };
     }),
   );
-  return { projects, setup: await setup.questions(), chromeHelper: cfg.chromeHelper, name: NAME };
+  return { projects, setup: await setup.questions(), chromeHelper: cfg.chromeHelper, orcaHere: projects.some((p) => p.orcaLocal), name: NAME };
 }
 
 const bridgeUp = (host) => Date.now() - (bridges.get(host) ?? 0) < 30_000;
@@ -368,6 +371,33 @@ const routes = [
     autoWork.reset(p, k);
     await autoWork.launch(project, ticket);
     send(res, 200, store.get(p, k).auto);
+  }],
+  // "Follow in Orca" for projects with Orca terminals: the hub finds (or creates, layout first)
+  // the terminal of the ticket or of the orchestrator in the Orca of this machine and returns
+  // { runtimeId, handle }; the page hands it to the desktop helper, which switches its Orca
+  // (paired with this one) to it. Only this machine's Orca: hubs never reach each other.
+  ["POST", /^\/api\/orca\/([^/]+)\/focus$/, "ui", async (req, res, [p]) => {
+    const project = projectById(p);
+    if (project.terminals?.type !== "orca") throw httpError(409, `${p} no usa terminales de Orca`);
+    if (project.host !== localHost()) throw httpError(409, `${p} corre en ${project.host}, no en este hub`);
+    const b = await body(req);
+    const key = b.key ? short(b.key) : null;
+    let spawn = null;
+    if (key && project.worker) {
+      const info = (trackerCache.get(p)?.tickets ?? []).find((t) => t.key === key) ?? {};
+      spawn = { command: project.worker.command, dir: project.autoWork.repoByGroup[String(info.group ?? "").toLowerCase()] ?? project.worker.dir };
+    }
+    const orca = await import("./orca.mjs");
+    try {
+      await orca.ensureOrcaRunning();
+      const target = await orca.focusTerminal(project, key, { spawn, hubUrl: cfg.publicUrls[0], log: (m) => console.log(`orca ${p}: ${m}`) });
+      // Orca with a window here (standalone: hub and desktop Orca on one machine) switches now;
+      // a server (orca serve) has no window, and the page asks the desktop helper instead.
+      const sw = await orca.orca(["terminal", "switch", "--terminal", target.handle]).catch(() => null);
+      send(res, 200, { ...target, navigated: sw?.focus?.navigated === true });
+    } catch (err) {
+      throw httpError(502, err.message);
+    }
   }],
   ["GET", /^\/agent\/bridge\/pending$/, "agent", async (req, res, _m, url) => {
     const host = short(url.searchParams.get("host"));

@@ -83,6 +83,8 @@ El cwd queda como `runtime.dir`; con varios repos, también como `repos_root` y 
 
 Los grupos y espacios de carpeta no tienen comando en el CLI de Orca: se piden al runtime por su socket unix (`orca-runtime.json` en la carpeta de datos de Orca, `ORCA_USER_DATA_PATH` u `ORCA_RUNTIME_FILE`: una línea JSON `{ id, authToken, method, params }`, una de respuesta).
 
+**Seguir en Orca** (proyectos con `runtime.terminal: orca`): al elegir un ticket (o el orquestador), la página pide `POST /api/orca/<id>/focus` `{ key }` (`key: null` = orquestador). El hub busca esa terminal en su propio Orca y, si falta, la crea: arma el proyecto primero si hace falta, y abre el agente del ticket en su repo, retomando su sesión si ya existía. Luego hace `orca terminal switch` y responde `{ runtimeId, handle, state, navigated }`. Con Orca de escritorio en la misma máquina (standalone), `navigated` es `true` y no hace falta el helper. Un `orca serve` no tiene ventana (`navigated: false`): entonces la página le pasa `{ runtimeId, handle }` al helper del escritorio (ver Helper). Solo proyectos de esta máquina (`host`): el hub nunca llama a otro nodo.
+
 Las terminales de ticket que abre el puente van en el repo del ticket (el de su grupo de tracker en `auto_work.repos_by_group`) o, si corre en la carpeta del proyecto, en el espacio de carpeta del grupo.
 
 ### `repos`
