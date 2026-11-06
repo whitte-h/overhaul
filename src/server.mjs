@@ -390,7 +390,9 @@ const routes = [
     const orca = await import("./orca.mjs");
     try {
       await orca.ensureOrcaRunning();
-      const target = await orca.focusTerminal(project, key, { spawn, hubUrl: cfg.publicUrls[0], log: (m) => console.log(`orca ${p}: ${m}`) });
+      // No hub tab from here: this page is already open (often in Orca's own browser).
+      // `overhaul terminal` builds the layout with it.
+      const target = await orca.focusTerminal(project, key, { spawn, log: (m) => console.log(`orca ${p}: ${m}`) });
       // Orca with a window here (standalone: hub and desktop Orca on one machine) switches now;
       // a server (orca serve) has no window, and the page asks the desktop helper instead.
       const sw = await orca.orca(["terminal", "switch", "--terminal", target.handle]).catch(() => null);

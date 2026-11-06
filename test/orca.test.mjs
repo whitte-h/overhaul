@@ -314,9 +314,20 @@ test("ensureOrg brings back the hub's ticket agents (resumed) and shows live tmu
   const sessionId = "3b0e8c1a-6c4e-4a57-9a4f-3c9f1f0d2b11";
   orca.saveRecord(orca.ticketRecord(p, "NX-7", { worktree: api, command: "claude", dir: api }));
   orca.saveRecord({ ...orca.loadRecord(api, "nx-7"), sessionId });
+  // Claude wrote that session (it got a message), so it is resumed.
+  const claudeDir = tmpDir("orca-claude-");
+  fs.mkdirSync(path.join(claudeDir, "projects", "-x"), { recursive: true });
+  fs.writeFileSync(path.join(claudeDir, "projects", "-x", `${sessionId}.jsonl`), "{}\n");
+  const prev = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = claudeDir;
   const o = fakeOrcaHost();
   const runTmux = async () => ({ stdout: "orq claude\nnx-9 2.1.3\nnotes zsh\n" });
-  await orca.ensureOrg(p, { exec: o.exec, call: o.call, runTmux });
+  try {
+    await orca.ensureOrg(p, { exec: o.exec, call: o.call, runTmux });
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prev;
+  }
   const t7 = o.st.terminals.find((t) => t.title === "nx-7");
   assert.equal(t7.sel, `path:${api}`);
   assert.match(t7.command, new RegExp(`HUB_TICKET='NX-7' .*claude --resume ${sessionId}$`));
@@ -328,6 +339,17 @@ test("ensureOrg brings back the hub's ticket agents (resumed) and shows live tmu
   // The bridge lists the agent terminals, not the views of tmux windows (those are listed by tmux).
   const wins = await orca.listTerminals([{ ...p, session: "nexus3" }], { exec: o.exec, call: o.call });
   assert.deepEqual(wins.map((w) => w.name), ["nx-7"]);
+});
+
+test("createTerminal: a Claude session never written starts with its id instead of --resume", async () => {
+  const o = fakeOrcaHost();
+  const rec = { worktree: "/c/s", title: "jug-1", command: "claude", dir: "/c/s", env: { HUB_TICKET: "JUG-1" }, sessionId: "d5249397-9fa1-4ee5-8d58-72b37ef6744b" };
+  await orca.createTerminal(rec, { resume: true, exec: o.exec, sessionExists: () => false });
+  assert.match(o.st.terminals.at(-1).command, /claude --session-id d5249397-9fa1-4ee5-8d58-72b37ef6744b$/);
+  await orca.createTerminal({ ...rec, title: "jug-2" }, { resume: true, exec: o.exec, sessionExists: () => true });
+  assert.match(o.st.terminals.at(-1).command, /claude --resume d5249397-9fa1-4ee5-8d58-72b37ef6744b$/);
+  await orca.createTerminal({ ...rec, title: "jug-3", command: "pi" }, { resume: true, exec: o.exec, sessionExists: () => false });
+  assert.match(o.st.terminals.at(-1).command, /pi --session-id d5249397-9fa1-4ee5-8d58-72b37ef6744b$/);
 });
 
 test("ticketWorktree: the ticket's repo, else the folder workspace (group) or the project's worktree", () => {

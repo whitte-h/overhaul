@@ -184,7 +184,27 @@ export function projectRecords(id) {
   }).filter((r) => r?.env?.HUB_PROJECT === id && !r.attach);
 }
 
-export async function createTerminal(rec, { resume = false, exec } = {}) {
+// Claude writes a session only after its first message: an agent opened and never used has none,
+// and `claude --resume <id>` would end at "No conversation found". Looked up in every Claude
+// config of this user (~/.claude, ~/.claude-<account>, CLAUDE_CONFIG_DIR).
+export function claudeSessionExists(id, { env = process.env, home = os.homedir() } = {}) {
+  const roots = new Set(env.CLAUDE_CONFIG_DIR ? [env.CLAUDE_CONFIG_DIR] : []);
+  for (const d of fs.readdirSync(home).filter((n) => /^\.claude(-[\w.-]+)?$/.test(n))) roots.add(path.join(home, d));
+  for (const root of roots) {
+    let dirs;
+    try {
+      dirs = fs.readdirSync(path.join(root, "projects"));
+    } catch {
+      continue;
+    }
+    if (dirs.some((d) => fs.existsSync(path.join(root, "projects", d, `${id}.jsonl`)))) return true;
+  }
+  return false;
+}
+
+export async function createTerminal(rec, { resume = false, exec, sessionExists = claudeSessionExists } = {}) {
+  // pi takes the id either way; Claude resumes only a session it wrote, else starts it with that id.
+  if (resume && rec.sessionId && !/^pi(\s|$)/.test(rec.command.trim()) && !sessionExists(rec.sessionId)) resume = false;
   const command = agentCommand({ ...rec, resume });
   const { terminal } = await orca(["terminal", "create", "--worktree", selector(rec.worktree), "--title", rec.title, "--command", command], { exec });
   return terminal.handle;
