@@ -21,7 +21,6 @@ const RUNTIMES = ["claude", "pi"];
 
 // --- Questions -------------------------------------------------------------------------------------
 // Answers come from the terminal, or line by line from stdin when it is not one (tests, scripts).
-// Secrets are read without echo on a terminal.
 export function prompter({ input = process.stdin, output = process.stderr } = {}) {
   const tty = !!input.isTTY;
   let muted = false;
@@ -56,9 +55,10 @@ export function prompter({ input = process.stdin, output = process.stderr } = {}
       const v = await read(`${q}${def !== "" && def != null ? ` [${def}]` : ""}: `);
       return v === "" ? String(def ?? "") : v;
     },
-    // Hidden. With a value already saved, Enter keeps it (returns null).
+    // Shown while typed, so a pasted token can be checked. With a value already saved, Enter
+    // keeps it (returns null).
     async secret(q, saved = false) {
-      const v = await read(`${q}${saved ? " [guardado; Enter lo mantiene]" : ""}: `, true);
+      const v = await read(`${q}${saved ? " [guardado; Enter lo mantiene]" : ""}: `);
       return v === "" ? (saved ? null : "") : v;
     },
     async yes(q, def = true) {
@@ -515,10 +515,10 @@ async function jiraStep({ io, ni, flags, old, PFX, env, savedEnv, pending, fetch
     const j = { baseUrl, cloud };
     if (cloud) {
       j.email = await io.ask(`Email de tu cuenta de Jira (va en env como ${emailEnv})`, savedEnv[emailEnv] ?? "");
-      const t = await io.secret(`API token (https://id.atlassian.com/manage-profile/security/api-tokens; va en env como ${tokenEnv}, no se ve al escribir)`, !!savedEnv[tokenEnv]);
+      const t = await io.secret(`API token (https://id.atlassian.com/manage-profile/security/api-tokens; va en env como ${tokenEnv})`, !!savedEnv[tokenEnv]);
       j.token = t ?? savedEnv[tokenEnv];
     } else {
-      const t = await io.secret(`Token personal de Jira (perfil → Personal Access Tokens; va en env como ${tokenEnv}, no se ve al escribir)`, !!savedEnv[tokenEnv]);
+      const t = await io.secret(`Token personal de Jira (perfil → Personal Access Tokens; va en env como ${tokenEnv})`, !!savedEnv[tokenEnv]);
       j.token = t ?? savedEnv[tokenEnv];
     }
     try {
@@ -584,7 +584,7 @@ async function kaneoStep({ io, ni, flags, old, PFX, env, savedEnv, pending, fetc
   io.say("3. Credenciales de Kaneo (se guardan en env, nunca en config.yaml).");
   for (;;) {
     baseUrl = cleanUrl(await askUrl(io, "URL de Kaneo (p. ej. https://kaneo.tuempresa.com)", baseUrl));
-    const t = await io.secret(`Token de API de Kaneo (va en env como ${tokenEnv}, no se ve al escribir)`, !!savedEnv[tokenEnv]);
+    const t = await io.secret(`Token de API de Kaneo (va en env como ${tokenEnv})`, !!savedEnv[tokenEnv]);
     const k = { baseUrl, token: t ?? savedEnv[tokenEnv] };
     try {
       if (!k.token) throw new WizardError("falta el token");
