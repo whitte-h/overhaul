@@ -222,25 +222,27 @@ async function spawnWorker(p, t) {
   console.error(`spawned ${session}:${name} in ${dir} for ${id}`);
 }
 
-// Same, as an Orca terminal in the project's worktree, titled like the tmux window would be.
-// Orca has no per-terminal variables, so the command sets them before starting the agent, and
-// what `hub restart` needs is kept next to the hub's config (orca.saveRecord).
+// Same, as an Orca terminal titled like the tmux window would be: in the ticket's repo, or in the
+// group's folder workspace when it runs in the project's folder (the layout is built first if
+// the project has none in Orca yet). Orca has no per-terminal variables, so the command sets them
+// before starting the agent, and what `hub restart` needs is kept next to the hub's config
+// (orca.saveRecord).
 async function spawnOrcaWorker(p, t) {
   const id = `${p.id}/${t.key}`;
   if (spawned.has(id)) return;
-  const worktree = orca.worktreeOf(p);
-  if (!worktree) throw new Error(`${p.id}: terminals: orca sin worktree`);
-  const title = t.key.toLowerCase();
-  const rec = {
-    worktree, title, command: t.spawn.command, sessionId: randomUUID(),
-    dir: t.spawn.dir.replace(/^~(?=\/|$)/, process.env.HOME),
-    // HUB_WINDOW: how the hub names this terminal, for the agent's hook (no tmux to ask).
-    env: { HUB_PROJECT: p.id, HUB_TICKET: t.key, HUB_AGENT_NAME: title, HUB_WINDOW: `${p.session}:${title}`, ...AGENT_ENV },
-  };
+  if (!orca.worktreeOf(p)) throw new Error(`${p.id}: terminals: orca sin worktree`);
+  const plan = orca.orcaPlan(p);
+  let orq = plan.worktree;
+  if (plan.grouped) {
+    const ws = await orca.folderWorkspace(plan);
+    orq = ws ? `id:folder:${ws}` : (await orca.ensureOrg(p, { log: (m) => console.error(`orca ${p.id}: ${m}`) })).worktree;
+  }
+  const dir = t.spawn.dir.replace(/^~(?=\/|$)/, process.env.HOME);
+  const rec = { ...orca.ticketRecord(p, t.key, { worktree: orca.ticketWorktree(plan, dir, orq), command: t.spawn.command, dir }), sessionId: randomUUID() };
   orca.saveRecord(rec);
   await orca.createTerminal(rec);
   spawned.add(id);
-  console.error(`spawned Orca terminal ${title} in ${worktree} for ${id}`);
+  console.error(`spawned Orca terminal ${rec.title} in ${rec.worktree} for ${id}`);
 }
 
 // The project's repos with their role, when it has several or says what each one is for. A ticket

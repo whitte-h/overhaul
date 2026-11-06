@@ -329,7 +329,7 @@ export function writeProject(doc, id, block) {
 }
 
 // Validates the whole config before it replaces config.yaml (backup in config.yaml.bak).
-function saveConfig(file, doc) {
+export function saveConfig(file, doc) {
   if (doc.errors.length) throw new WizardError(doc.errors[0].message);
   normalize(doc.toJS() ?? {});
   fs.copyFileSync(file, `${file}.bak`);
@@ -355,7 +355,7 @@ export async function runInit(opts = {}) {
   }
 }
 
-const quietIo = () => ({ say: (m = "") => process.stderr.write(`${m}\n`) });
+export const quietIo = () => ({ say: (m = "") => process.stderr.write(`${m}\n`) });
 
 async function wizard(o) {
   const { io, env, userHome } = o;
@@ -460,6 +460,8 @@ async function wizard(o) {
 
   if (secrets.length) setEnvVars(P.env, pending);
   writeProject(cfg.doc, id, block);
+  const { ensureHelper, HELPER_URL } = await import("./terminal.mjs");
+  if (agents.helper && ensureHelper(cfg.doc)) io.say(`Agrego helper: ${HELPER_URL} a la config (el hub llama al helper de tu escritorio).`);
   try {
     saveConfig(P.config, cfg.doc);
   } catch (err) {
@@ -473,6 +475,9 @@ async function wizard(o) {
 
   // 7. Services and the link ---------------------------------------------------------------------------
   await restartServices({ io, env, userHome, self, enabled: o.restart !== false, run: o.runServices });
+
+  // 8. Orca: the project's layout in this machine's Orca, right away when Orca is here.
+  if (block.runtime.terminal === "orca") await orcaStep({ io, env, doc: cfg.doc, id, orca: o.orca });
   const url = projectUrl(cfg.raw, id);
   io.say("");
   io.say(`Listo: ${url}`);
@@ -709,6 +714,9 @@ async function agentsStep({ io, ni, flags, cwd, repos, old, id, env }) {
   let orchestrator = flags.orchestrator ?? r.orchestrator ?? `${id}:orq`;
   let location = flags["agents-location"] ?? old.agents?.location ?? (lane ? "repo" : "external");
   if (!["external", "repo"].includes(location)) throw new WizardError(`--agents-location: ${location} no es external ni repo`, 2);
+  let terminal = flags.terminal ?? r.terminal ?? null;
+  if (terminal && !["tmux", "orca"].includes(terminal)) throw new WizardError(`--terminal: ${terminal} no es tmux ni orca`, 2);
+  let helper = !!flags.helper;
   if (!ni) {
     io.say("");
     io.say("5. Agentes.");
@@ -723,7 +731,12 @@ async function agentsStep({ io, ni, flags, cwd, repos, old, id, env }) {
     if (!which(command.split(/\s+/)[0], env)) io.say(`   Aviso: no encuentro ${command.split(/\s+/)[0]} en el PATH de esta terminal.`);
     const p = await io.ask("Primer mensaje de cada agente de ticket ({key} = la clave; - = ninguno)", prompt ?? "-");
     prompt = p === "-" || p === "" ? null : p;
-    orchestrator = await io.ask("Ventana de tmux del orquestador (sesión:ventana; recibe los tickets sin ventana propia)", orchestrator);
+    const { chooseTerminal } = await import("./terminal.mjs");
+    terminal = await chooseTerminal({ io, ni, flag: flags.terminal, env, current: terminal });
+    orchestrator = await io.ask(terminal === "orca"
+      ? "Nombre del orquestador (sesión:título; su terminal de Orca se titula así y recibe los tickets sin terminal propia)"
+      : "Ventana de tmux del orquestador (sesión:ventana; recibe los tickets sin ventana propia)", orchestrator);
+    if (terminal === "orca") helper = await io.yes("¿Miras este hub también desde otro computador con el helper de Overhaul (su Orca sigue los tickets)?", helper);
     if (!lane) {
       location = await io.choose("¿Dónde vive el perfil de agentes?", [
         { value: "external", label: "fuera del repo, en la config de Overhaul (recomendado)" },
@@ -735,9 +748,27 @@ async function agentsStep({ io, ni, flags, cwd, repos, old, id, env }) {
   // questions agent, OVH-29); a repo with its own lane keeps its own and has none here.
   const profile = lane ? null : old.agents?.profile ?? "default";
   return {
-    runtime: { command, prompt, orchestrator },
+    runtime: { command, prompt, orchestrator, terminal },
     agents: { location, profile },
+    helper,
   };
+}
+
+async function orcaStep({ io, env, doc, id, orca }) {
+  const { buildOrca, hasOrca } = await import("./terminal.mjs");
+  if (!orca && !hasOrca(env)) {
+    io.say("Orca: no lo encuentro en esta máquina (orca en el PATH, ORCA_BIN o /Applications/Orca.app). Cuando esté, corre overhaul terminal en la carpeta del proyecto.");
+    return;
+  }
+  const cfg = normalize(doc.toJS() ?? {});
+  io.say("");
+  io.say("Orca: armando el proyecto…");
+  try {
+    await buildOrca(cfg, cfg.projects.find((p) => p.id === id), { io, env, orca });
+    io.say("Orca: listo (overhaul terminal abre el orquestador).");
+  } catch (err) {
+    io.say(`Orca: no pude armarlo (${err.message}). Reintenta con overhaul terminal.`);
+  }
 }
 
 // Claude Code's hook and pi's extension, when missing (asking first).
@@ -805,7 +836,7 @@ async function askUrl(io, q, def) {
 }
 
 // --- overhaul project list | edit | remove, overhaul open --------------------------------------------
-function load(env = process.env, userHome = env.HOME ?? os.homedir()) {
+export function load(env = process.env, userHome = env.HOME ?? os.homedir()) {
   const P = resolvePaths(env, userHome);
   if (!fs.existsSync(P.config)) throw new WizardError(`No existe ${P.config}: corre overhaul setup (o overhaul init en la carpeta de un proyecto)`);
   return { P, ...readConfig(P), expand: expandHomeIn(userHome) };
@@ -832,7 +863,7 @@ export function listProjects({ json = false, env, userHome, log = (m) => console
   }
 }
 
-function resolveProject(raw, id, cwd, expand) {
+export function resolveProject(raw, id, cwd, expand) {
   if (id) {
     if (!raw.projects?.[id]) throw new WizardError(`No hay un proyecto ${id} (overhaul project list)`);
     return id;

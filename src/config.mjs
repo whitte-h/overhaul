@@ -76,7 +76,7 @@ export function normalize(raw) {
     const repoList = repoEntries(id, p.repos ?? (p.repo ? [p.repo] : []));
     const firstRepo = p.repo ?? repoList[0]?.path;
     const repo = expandHome(firstRepo ?? null);
-    const rt = runtime(id, p, cfg.terminal, firstRepo);
+    const rt = runtime(id, p, cfg.terminal, firstRepo, repoList.map((r) => r.path));
 
     cfg.projects.push({
       id,
@@ -162,7 +162,7 @@ export function normalize(raw) {
 //     orchestrator: x:orq                    (tmux target for tickets without a window)
 //     per_ticket: true                       (false: no agent per ticket, only the orchestrator)
 // v1 spread it over worker, terminals, orca and orchestrator; both are read.
-function runtime(id, p, defaultTerminal, repo) {
+function runtime(id, p, defaultTerminal, repo, repoPaths = []) {
   const r = p.runtime;
   let worker;
   if (r) {
@@ -181,7 +181,22 @@ function runtime(id, p, defaultTerminal, repo) {
   if (type === "orca") {
     const worktree = r?.orca_worktree ?? p.orca?.worktree ?? worker?.dir ?? r?.dir;
     if (!worktree) throw new Error(`${id}: terminal orca needs runtime.orca_worktree or runtime.dir`);
-    terminals = { type, worktree: String(worktree) };
+    // What Orca shows (src/orca.mjs orcaPlan): with several repos, a project group on their
+    // common folder (repos_root, else runtime.dir) with the orchestrator in its folder workspace;
+    // with one, that repo. Paths as written (~ is resolved on the agents' host).
+    const orchestrator = r?.orchestrator ?? p.orchestrator ?? null;
+    terminals = {
+      type,
+      worktree: String(worktree),
+      name: String(p.name ?? id),
+      repos: repoPaths.map(String),
+      parent: String(p.repos_root ?? r?.dir ?? worktree),
+      orchestrator: {
+        title: orchestrator ? String(orchestrator).split(":").slice(1).join(":") || "orq" : "orq",
+        command: String(r?.command ?? p.worker?.command ?? "claude"),
+        dir: String(r?.dir ?? worker?.dir ?? worktree),
+      },
+    };
   }
   return { worker, terminals, orchestrator: r?.orchestrator ?? p.orchestrator ?? null };
 }

@@ -122,7 +122,7 @@ test("init, Jira Cloud with two repos: validates the token, lists projects, buil
       "", // repos: all
       "", "", // api: backend, its package.json description
       "", "Tienda web", // web: frontend, own description
-      "", "", "", "", // claude, no prompt, acme:orq, external
+      "", "", "", "", "", // claude, no prompt, tmux, acme:orq, external
       "", // save
     ]);
     assert.equal(code, 0, out);
@@ -147,7 +147,7 @@ test("init, Jira Cloud with two repos: validates the token, lists projects, buil
     ]);
     assert.equal(p.repos_root, "~/code/acme");
     assert.equal(p.repo, undefined);
-    assert.deepEqual(p.runtime, { dir: "~/code/acme", command: "claude", orchestrator: "acme:orq" });
+    assert.deepEqual(p.runtime, { dir: "~/code/acme", command: "claude", orchestrator: "acme:orq", terminal: "tmux" });
     assert.deepEqual(p.agents, { location: "external", profile: "default" });
     assert.match(envVars(m), /^ACME_JIRA_EMAIL=me@example\.com$/m);
     assert.match(envVars(m), /^ACME_JIRA_TOKEN=jira-secret-token$/m);
@@ -172,7 +172,7 @@ test("init: a bad token asks again; a rejected JQL is asked again", async () => 
       "s", // try again
       jira.url, "s", "me@example.com", "jira-secret-token",
       "OPS", "project = OPS AND nonsense", "project = OPS",
-      "1", "", "", "", "", "", "", "", "",
+      "1", "", "", "", "", "", "", "", "", "",
     ]);
     assert.equal(code, 0, out);
     assert.match(out, /No pude validar: Jira: 401/);
@@ -201,7 +201,7 @@ test("init in the same folder again offers to edit it, never a second project; E
   const parent = twoRepos(m.home);
   const jira = await fakeJira();
   try {
-    const answers = ["1", "Acme", "", jira.url, "s", "me@example.com", "jira-secret-token", "1", "", "", "", "", "", "", "", "", "", "", ""];
+    const answers = ["1", "Acme", "", jira.url, "s", "me@example.com", "jira-secret-token", "1", "", "", "", "", "", "", "", "", "", "", "", ""];
     assert.equal((await wizard(m, parent, answers)).code, 0);
     fs.appendFileSync(m.config, "# my own comment\n");
     const before = fs.readFileSync(m.config, "utf8");
@@ -212,7 +212,7 @@ test("init in the same folder again offers to edit it, never a second project; E
     assert.equal(fs.readFileSync(m.config, "utf8"), before);
 
     // Edit: everything by Enter (token kept), except web's role.
-    const edit = await wizard(m, parent, ["s", "", "", "", "", "", "", "", "", "", "", "", "ui", "", "", "", "", "", ""]);
+    const edit = await wizard(m, parent, ["s", "", "", "", "", "", "", "", "", "", "", "", "ui", "", "", "", "", "", "", ""]);
     assert.equal(edit.code, 0, edit.out);
     assert.match(edit.out, /\[guardado; Enter lo mantiene\]/);
     const text = fs.readFileSync(m.config, "utf8");
@@ -226,9 +226,9 @@ test("init in the same folder again offers to edit it, never a second project; E
 test("init: an id that exists elsewhere offers to edit that project", async () => {
   const m = machine();
   const parent = twoRepos(m.home);
-  const { code } = await wizard(m, path.join(parent, "api"), ["none", "Acme", "acme", "", "", "", "", "", "", ""]);
+  const { code } = await wizard(m, path.join(parent, "api"), ["none", "Acme", "acme", "", "", "", "", "", "", "", ""]);
   assert.equal(code, 0);
-  const { code: c2, out } = await wizard(m, parent, ["none", "Acme 2", "acme", "s", "", "", "", "", "", "", "", "", "", ""]);
+  const { code: c2, out } = await wizard(m, parent, ["none", "Acme 2", "acme", "s", "", "", "", "", "", "", "", "", "", "", ""]);
   assert.equal(c2, 0, out);
   assert.match(out, /Ya existe el proyecto acme \(en ~\/code\/acme\/api\)/);
   const projects = YAML.parse(fs.readFileSync(m.config, "utf8")).projects;
@@ -249,7 +249,7 @@ test("init, Kaneo on a shared workspace: lists workspaces and projects, writes t
       "", // the only workspace
       "s", "", "1,xyz", // shared; projects; Alpha and Beta
       "", "", // repo role, description
-      "", "", "", "",
+      "", "", "", "", "",
       "",
     ]);
     assert.equal(code, 0, out);
@@ -267,7 +267,7 @@ test("init, kanban-md recommended without a tracker: runs kanban-md init; withou
   const m = machine();
   const repo = gitRepo(path.join(m.home, "code/notes-app"), { "README.md": "# Notes\n\nNotas rápidas.\n" });
   fakeTool(m, "kanban-md", `echo "$*" >> "$HOME/kanban.log"; while [ $# -gt 0 ]; do [ "$1" = --dir ] && { mkdir -p "$2/tasks"; echo "name: x" > "$2/config.yml"; }; shift; done`);
-  const { code, out } = await wizard(m, repo, ["", "Notes", "", "", "", "", "", "", "", "", "", "", ""]);
+  const { code, out } = await wizard(m, repo, ["", "Notes", "", "", "", "", "", "", "", "", "", "", "", ""]);
   assert.equal(code, 0, out);
   assert.match(out, /Te recomiendo kanban-md/);
   assert.match(fs.readFileSync(path.join(m.home, "kanban.log"), "utf8"), new RegExp(`^init --dir ${repo}/kanban --name Notes$`, "m"));
@@ -276,7 +276,7 @@ test("init, kanban-md recommended without a tracker: runs kanban-md init; withou
 
   const m2 = machine();
   const repo2 = gitRepo(path.join(m2.home, "code/x"));
-  const r2 = await wizard(m2, repo2, ["3", "X", "", "", "", "", "", "", "", "", "", ""]);
+  const r2 = await wizard(m2, repo2, ["3", "X", "", "", "", "", "", "", "", "", "", "", ""]);
   assert.equal(r2.code, 0, r2.out);
   assert.match(r2.out, /kanban-md no está instalado\. Instálalo \(https:\/\/github\.com\/antopolskiy\/kanban-md/);
   assert.equal(project(m2, "x").tracker.type, "kanban-md");
@@ -285,7 +285,7 @@ test("init, kanban-md recommended without a tracker: runs kanban-md init; withou
 test("init: a repo with its own lane (ORCA.md, .pi/) keeps it: pi by default, profile in the repo", async () => {
   const m = machine();
   const repo = gitRepo(path.join(m.home, "code/lane"), { "ORCA.md": "# lanes\n", ".pi/settings.json": "{}" });
-  const { code, out } = await wizard(m, repo, ["none", "Lane", "", "", "", "", "/skill:lane-orchestrator {key}", "", ""]);
+  const { code, out } = await wizard(m, repo, ["none", "Lane", "", "", "", "", "/skill:lane-orchestrator {key}", "", "", ""]);
   assert.equal(code, 0, out);
   assert.match(out, /tiene lane propio \(ORCA\.md\): lo respeto/);
   const p = project(m, "lane");
@@ -299,13 +299,13 @@ test("init: installs Claude's hook and pi's extension when missing, asking first
   const repo = gitRepo(path.join(m.home, "code/h"));
   fakeTool(m, "claude");
   fakeTool(m, "pi");
-  const { code, out } = await wizard(m, repo, ["none", "H", "", "", "", "", "", "", "", "", "s", "s"]);
+  const { code, out } = await wizard(m, repo, ["none", "H", "", "", "", "", "", "", "", "", "", "s", "s"]);
   assert.equal(code, 0, out);
   const settings = JSON.parse(fs.readFileSync(path.join(m.home, ".claude/settings.json"), "utf8"));
   assert.match(settings.hooks.Stop[0].hooks[0].command, /^\/opt\/overhaul\/bin\/overhaul hook Stop$/);
   assert.ok(fs.existsSync(path.join(m.home, ".pi/agent/extensions/overhaul.ts")));
   // Already there: not asked again.
-  const again = await wizard(m, repo, ["s", "", "", "", "", "", "", "", "", ""]);
+  const again = await wizard(m, repo, ["s", "", "", "", "", "", "", "", "", "", ""]);
   assert.equal(again.code, 0, again.out);
   assert.doesNotMatch(again.out, /¿Instalo el hook/);
 });
@@ -316,7 +316,7 @@ test("init restarts the services when they are installed", async () => {
   write(path.join(m.home, ".config/systemd/user/overhaul.service"), "[Service]\n");
   const calls = [];
   const env = { ...m.env, OVERHAUL_PLATFORM: "linux" };
-  const { code, out } = await wizard({ ...m, env }, repo, ["none", "S", "", "", "", "", "", "", "", ""], {
+  const { code, out } = await wizard({ ...m, env }, repo, ["none", "S", "", "", "", "", "", "", "", "", ""], {
     runServices: (cmd, args) => { calls.push([cmd, ...args].join(" ")); return { status: 0, stdout: "", stderr: "" }; },
   });
   assert.equal(code, 0, out);

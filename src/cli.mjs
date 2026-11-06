@@ -30,6 +30,8 @@ Proyectos (en la carpeta del proyecto):
   project edit [id]                    reabre el asistente con lo actual (por defecto, el del cwd)
   project remove <id> [--force]        quita el proyecto de config.yaml
   open [id]                            abre /p/<proyecto> en el navegador (por defecto, el del cwd)
+  terminal [id] [--terminal tmux|orca] abre o enfoca la terminal del orquestador (tmux u Orca);
+                                       con Orca arma el proyecto en el Orca de esta máquina
 
 Instalación:
   setup                                crea config.yaml y env en ~/.overhaul si faltan
@@ -87,6 +89,8 @@ const OPTIONS = {
   orchestrator: { type: "string" },
   "agents-location": { type: "string" },
   hooks: { type: "boolean" },
+  terminal: { type: "string" },
+  helper: { type: "boolean" },
   "no-validate": { type: "boolean" },
 };
 
@@ -139,6 +143,7 @@ const COMMANDS = {
   init: initCommand,
   project: projectCommand,
   open: openCommand,
+  terminal: terminalCommand,
   config: configCommand,
   "orca-layout": orcaLayoutCommand,
   update: updateCommand,
@@ -430,7 +435,7 @@ async function initCommand(rest) {
   process.exit(await runInit(wizardOptions()));
 }
 
-const WIZARD_FLAGS = ["project", "name", "tracker", "base-url", "email-env", "token-env", "jql", "workspace-id", "kaneo-projects", "exclude-projects", "kanban-dir", "prefix", "repo", "runtime", "command", "prompt", "orchestrator", "agents-location", "hooks", "no-validate"];
+const WIZARD_FLAGS = ["project", "name", "tracker", "base-url", "email-env", "token-env", "jql", "workspace-id", "kaneo-projects", "exclude-projects", "kanban-dir", "prefix", "repo", "runtime", "command", "prompt", "orchestrator", "agents-location", "hooks", "no-validate", "terminal", "helper"];
 function wizardOptions(extra = {}) {
   return {
     cwd: process.cwd(),
@@ -457,6 +462,11 @@ async function projectCommand([sub, id]) {
 async function openCommand([id]) {
   const { openProject } = await import("./wizard.mjs");
   process.exit(await openProject(id, { cwd: process.cwd() }));
+}
+
+async function terminalCommand([id]) {
+  const { runTerminal } = await import("./terminal.mjs");
+  process.exit(await runTerminal(id, { cwd: process.cwd(), nonInteractive: opt["non-interactive"], flags: { terminal: opt.terminal } }));
 }
 
 async function updateCommand() {

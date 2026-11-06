@@ -68,10 +68,10 @@ async function savedSession(win) {
 export const isPi = (command) => /^pi(\s|$)/.test(String(command ?? "").trim());
 const PI_ENV = { HUB_PROJECT: "@hub_project", HUB_TICKET: "@hub_ticket", HUB_AGENT_NAME: "@hub_agent_name" };
 
-export async function markPiWindow(target, sessionId, vars = {}) {
+export async function markPiWindow(target, sessionId, vars = {}, runTmux = (args) => run(TMUX, args)) {
   const opts = { "@hub_agent": "pi", "@hub_session": sessionId };
   for (const [k, opt] of Object.entries(PI_ENV)) if (vars[k]) opts[opt] = vars[k];
-  for (const [k, v] of Object.entries(opts)) await run(TMUX, ["set-option", "-w", "-t", target, k, v]);
+  for (const [k, v] of Object.entries(opts)) await runTmux(["set-option", "-w", "-t", target, k, v]);
 }
 
 async function piWindow(win) {

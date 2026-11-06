@@ -32,6 +32,7 @@ Un solo ejecutable, `overhaul`, en el `PATH`. Sin Node instalado (excepto el hel
 | | `project edit [id]` | Reabre el asistente con lo actual; sin id, el proyecto del cwd. |
 | | `project remove <id> [--force]` | Quita el bloque de config.yaml (pregunta; `--force` sin preguntar). Las credenciales en `env` y los datos de la base quedan. |
 | | `open [id]` | Imprime y abre `http://localhost:<port>/p/<id>`; sin id, el proyecto del cwd. |
+| | `terminal [id] [--terminal tmux\|orca]` | Abre o enfoca la terminal del orquestador del proyecto (ver Terminal); sin id, el proyecto del cwd. |
 | Instalación | `setup` | Crea `config.yaml` y `env` (con `HUB_AGENT_TOKEN`) si faltan. Nunca los reemplaza. Lo corren install.sh, `service install`, `update` y Homebrew. Antes de v0.2.1 se llamaba `init`. |
 | | `set-password [--no-restart]` | Contraseña de la página (`HUB_TOKEN`, o lo que diga `auth.password_env`). Lee de la terminal sin eco. |
 | | `migrate [--dry-run]` | Adopta una instalación anterior en `~/.overhaul` (ver Migración). |
@@ -57,14 +58,32 @@ Un solo ejecutable, `overhaul`, en el `PATH`. Sin Node instalado (excepto el hel
    - Kaneo: lista los workspaces (o pide el id), los proyectos del elegido y, si es compartido, escribe `projects` o `exclude_projects`.
    - kanban-md: carpeta del board (por defecto `<cwd>/kanban`) y prefijo; si no hay board corre `kanban-md init --dir <dir> --name <nombre>`; si kanban-md no está instalado, dice cómo instalarlo y deja el tracker configurado.
 4. **Repos**: si el cwd es un repo, ese; si no, sus carpetas hijas con `.git` (se eligen). Por cada uno propone `role` y `description` (package.json, go.mod, README, nombre) y el usuario los confirma o edita.
-5. **Agentes**: `runtime.command` (`claude`, `pi` o un comando propio), `runtime.prompt` y `runtime.orchestrator`; `agents.location` (`external` por defecto, o `repo`) y `agents.profile: default` (el perfil por defecto; el agente de preguntas llega en #29). Un repo con lane propio (`ORCA.md`, `.pi/`) se respeta: `pi` por defecto si tiene `.pi/`, `agents.location: repo`, sin `profile`.
+5. **Agentes**: `runtime.command` (`claude`, `pi` o un comando propio), `runtime.prompt`, `runtime.terminal` (`tmux` u `orca`; `orca` por defecto si esta máquina tiene Orca) y `runtime.orchestrator`; con `orca`, si el hub se mira también desde otro computador con el helper (escribe `helper: http://127.0.0.1:7421` si falta); `agents.location` (`external` por defecto, o `repo`) y `agents.profile: default` (el perfil por defecto; el agente de preguntas llega en #29). Un repo con lane propio (`ORCA.md`, `.pi/`) se respeta: `pi` por defecto si tiene `.pi/`, `agents.location: repo`, sin `profile`.
 6. Muestra el bloque, pide confirmación y lo escribe en `config.yaml` clave por clave (comentarios y demás claves intactos, respaldo `config.yaml.bak`, validado antes de reemplazar).
 7. **Hooks**: si faltan, ofrece el de Claude Code (`~/.claude/settings.json`) y, con `pi` en el `PATH`, su extensión.
-8. Reinicia hub y puente si los servicios están instalados, y muestra (y abre, si hay navegador) `http://localhost:<port>/p/<id>`.
+8. Reinicia hub y puente si los servicios están instalados.
+9. **Orca** (`runtime.terminal: orca`): arma el proyecto en el Orca de esta máquina, como `overhaul terminal`. Sin Orca, guarda la config y dice que corras `overhaul terminal` cuando esté. Muestra (y abre, si hay navegador) `http://localhost:<port>/p/<id>`.
 
 El cwd queda como `runtime.dir`; con varios repos, también como `repos_root` y sin `repo`. Con un solo repo, `repo` es ese. Si ya hay un proyecto en esa carpeta (`runtime.dir`, `repos_root`, `repo` o el primer repo) o con ese id, ofrece editarlo: nunca lo duplica.
 
-`--non-interactive` toma lo mismo de flags: `--project`, `--name`, `--tracker`, `--base-url`, `--email-env`, `--token-env`, `--jql`, `--workspace-id`, `--kaneo-projects a,b`, `--exclude-projects a,b`, `--kanban-dir`, `--prefix`, `--repo path:role:description` (repetible; vacíos = propuestos; sin `--repo`, los detectados), `--runtime claude|pi|<comando>`, `--prompt`, `--orchestrator`, `--agents-location`, `--hooks`, `--no-validate`, `--no-restart`. Los secretos nunca van en flags: se leen de la variable nombrada por `--*-env` (del entorno, que se copia a `env`, o de `env`). Sale con `2` si falta un flag necesario o uno es inválido, `1` si la validación falla.
+`--non-interactive` toma lo mismo de flags: `--project`, `--name`, `--tracker`, `--base-url`, `--email-env`, `--token-env`, `--jql`, `--workspace-id`, `--kaneo-projects a,b`, `--exclude-projects a,b`, `--kanban-dir`, `--prefix`, `--repo path:role:description` (repetible; vacíos = propuestos; sin `--repo`, los detectados), `--runtime claude|pi|<comando>`, `--prompt`, `--orchestrator`, `--terminal tmux|orca`, `--helper`, `--agents-location`, `--hooks`, `--no-validate`, `--no-restart`. Los secretos nunca van en flags: se leen de la variable nombrada por `--*-env` (del entorno, que se copia a `env`, o de `env`). Sale con `2` si falta un flag necesario o uno es inválido, `1` si la validación falla.
+
+### Terminal
+
+`overhaul terminal [id]` corre en la carpeta del proyecto (o con su id). Si el proyecto no dice dónde corren sus agentes (`runtime.terminal`; en v1, `terminals`), pregunta `tmux` u `orca` (`--terminal` en `--non-interactive`, que sin él sale con `2`) y lo escribe en `config.yaml` sin tocar comentarios (respaldo `config.yaml.bak`). Solo usa esta máquina: el hub nunca se conecta a otro nodo.
+
+- **tmux**: crea la ventana del orquestador (`runtime.orchestrator`, por defecto `<id>:orq`) si falta, con `runtime.command` en `runtime.dir` y `HUB_PROJECT`/`HUB_AGENT_NAME` (pi con id de sesión fijo, marcado para `overhaul restart`); luego `switch-client` dentro de tmux o `attach` fuera.
+- **orca**: con el CLI de Orca (`ORCA_BIN`, `orca` en el `PATH` o `/Applications/Orca.app/Contents/Resources/bin/orca`), abre Orca si no corre y arma el proyecto, idempotente:
+  - Varios repos: un **grupo** de Orca en su carpeta común (`repos_root`, si no `runtime.dir`) con exactamente esos repos (`projectGroup.importNested`; un repo suelto o en otro grupo se mueve con `projectGroup.moveProject`) y un **espacio de carpeta** (`folderWorkspace.create`) donde van el orquestador y la pestaña del hub. Un repo fuera de esa carpeta es un error: pon `repos_root`.
+  - Un repo: ese repo (`orca repo add`) con el orquestador y la pestaña.
+  - Pestaña del hub en `<public_url>/p/<id>`.
+  - Orquestador: terminal titulada con la parte de ventana de `runtime.orchestrator` (`orq`), que corre `runtime.command` en `runtime.dir` con sesión fija (`overhaul restart` la retoma). Si sigue viva en tmux, la terminal se engancha a esa ventana en vez de abrir otro agente.
+  - Agentes: los que abrió el hub y Orca perdió se reabren retomando su sesión; las ventanas de agentes vivas en la sesión de tmux del proyecto se muestran enganchadas (vista agrupada `hub-*`).
+  - Al final, `orca terminal switch` al orquestador. En un servidor (`orca serve`, sin ventana) lo dice: se sigue desde el Orca del escritorio.
+
+Los grupos y espacios de carpeta no tienen comando en el CLI de Orca: se piden al runtime por su socket unix (`orca-runtime.json` en la carpeta de datos de Orca, `ORCA_USER_DATA_PATH` u `ORCA_RUNTIME_FILE`: una línea JSON `{ id, authToken, method, params }`, una de respuesta).
+
+Las terminales de ticket que abre el puente van en el repo del ticket (el de su grupo de tracker en `auto_work.repos_by_group`) o, si corre en la carpeta del proyecto, en el espacio de carpeta del grupo.
 
 ### `repos`
 
