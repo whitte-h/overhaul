@@ -4,7 +4,7 @@
 // overhaul.orca) or by hand on a fresh Orca:  node helper/orca-restore.mjs [project]
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { ORCA, layout, restoreProject } from "./orca.mjs";
+import { ORCA, layoutOrNull, restoreProject } from "./orca.mjs";
 
 const run = promisify(execFile);
 const only = process.argv[2];
@@ -15,8 +15,15 @@ await run(ORCA, ["open"], { timeout: 120_000 }).catch((err) => {
   process.exit(1);
 });
 
+// Without a layout (hubs whose projects use Orca terminals build theirs in their own Orca with
+// `overhaul terminal`) there is nothing to restore here.
+const lay = layoutOrNull();
+if (!lay) {
+  console.log("Sin layout de Orca: nada que restaurar");
+  process.exit(0);
+}
 let failed = false;
-for (const p of layout().projects.filter((x) => !only || x.id === only)) {
+for (const p of lay.projects.filter((x) => !only || x.id === only)) {
   try {
     await restoreProject(p, console.log);
   } catch (err) {

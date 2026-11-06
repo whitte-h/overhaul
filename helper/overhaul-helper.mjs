@@ -7,19 +7,21 @@
 import http from "node:http";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { attachCommand, layout, orca, orcaTerminal, restoreProject, worktreeOf } from "./orca.mjs";
+import { attachCommand, helperOrigins, layout, layoutOrNull, orca, orcaTerminal, restoreProject, switchTo, worktreeOf } from "./orca.mjs";
 import { devServers, ensureForward, syncForwards } from "./ports.mjs";
 
 const PORT = Number(process.env.CHROME_HELPER_PORT ?? 7421);
-// The hub's origins and the hosts to forward from come from the Orca layout (`origins`, and the
-// projects' hosts); HUB_ORIGINS and FORWARD_HOSTS (comma-separated) override them.
-const ORIGINS = process.env.HUB_ORIGINS ? process.env.HUB_ORIGINS.split(",") : layout().origins;
+// The hubs' origins: HUB_ORIGINS, ~/.overhaul/helper.json and the Orca layout, together (see
+// helperOrigins). The hosts to forward from come from the layout's projects (FORWARD_HOSTS,
+// comma-separated, overrides them); without a layout there are none.
+const ORIGINS = helperOrigins();
 const PROFILE_RE = /^(Default|Profile \d{1,3})$/;
-const SSH_HOSTS = process.env.FORWARD_HOSTS ? process.env.FORWARD_HOSTS.split(",") : [...new Set(layout().projects.map((p) => p.host))]; // ssh aliases allowed to forward from
+const LAYOUT_HOSTS = [...new Set((layoutOrNull()?.projects ?? []).map((p) => p.host))];
+const SSH_HOSTS = process.env.FORWARD_HOSTS ? process.env.FORWARD_HOSTS.split(",") : LAYOUT_HOSTS; // ssh aliases allowed to forward from
 const run = promisify(execFile);
 
 // Dev servers on the agent hosts, forwarded here as they appear (see ports.mjs).
-const DEV_HOSTS = [...new Set(layout().projects.map((p) => p.host))];
+const DEV_HOSTS = LAYOUT_HOSTS;
 let scanning = false; // a scan with new forwards can outlast the interval
 const scan = () => {
   if (scanning) return;
@@ -107,9 +109,25 @@ http
       }
       return;
     }
+    // A terminal of a hub's own Orca (projects with Orca terminals), by its handle there.
+    if (req.method === "POST" && url.pathname === "/orca/switch") {
+      const runtimeId = url.searchParams.get("runtimeId") ?? "";
+      const handle = url.searchParams.get("handle") ?? "";
+      if (!/^term_[\w-]{1,80}$/.test(handle) || !/^[\w-]{0,80}$/.test(runtimeId)) {
+        res.writeHead(400, cors).end("bad handle or runtime");
+        return;
+      }
+      try {
+        await switchTo(runtimeId, handle);
+        res.writeHead(204, cors).end();
+      } catch (err) {
+        res.writeHead(502, cors).end(err.message);
+      }
+      return;
+    }
     // Rebuilds a project's Orca layout (hub tab + every agent terminal) from the Orca layout.
     if (req.method === "POST" && url.pathname === "/orca/restore") {
-      const p = layout().projects.find((x) => x.id === url.searchParams.get("project"));
+      const p = layoutOrNull()?.projects.find((x) => x.id === url.searchParams.get("project"));
       if (!p) {
         res.writeHead(400, cors).end("unknown project");
         return;

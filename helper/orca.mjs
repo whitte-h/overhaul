@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-export const ORCA = "/Applications/Orca.app/Contents/Resources/bin/orca";
+export const ORCA = process.env.ORCA_BIN || "/Applications/Orca.app/Contents/Resources/bin/orca";
 const ATTACH = path.join(HERE, "attach.mjs");
 
 const expandHome = (p) => (p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p);
@@ -26,6 +26,48 @@ export function layoutFile(env = process.env, home = os.homedir()) {
   if (!found) throw new Error(`Sin layout de Orca: crea ${files[0]} con \`overhaul orca-layout\` en el host del hub`);
   return found;
 }
+// The layout when there is one: hubs whose projects use Orca terminals need none.
+export function layoutOrNull() {
+  try {
+    return layout();
+  } catch {
+    return null;
+  }
+}
+
+// Hub pages the helper answers: HUB_ORIGINS (comma-separated), ~/.overhaul/helper.json
+// ({ "origins": [...] }, one entry per hub: joaquin, robots...) and the layout's, all together.
+export function helperOrigins(env = process.env, home = os.homedir(), lay = layoutOrNull()) {
+  const file = path.join(env.OVERHAUL_HOME || path.join(home, ".overhaul"), "helper.json");
+  let fromFile = [];
+  try {
+    fromFile = JSON.parse(fs.readFileSync(file, "utf8")).origins ?? [];
+  } catch {}
+  const all = [...(env.HUB_ORIGINS ? env.HUB_ORIGINS.split(",") : []), ...fromFile, ...(lay?.origins ?? [])];
+  return [...new Set(all.map((o) => String(o).trim().replace(/\/$/, "")).filter(Boolean))];
+}
+
+// "Follow in Orca" for hubs with Orca terminals: the hub gives the terminal's handle and the id of
+// its Orca runtime. This Orca switches to it: directly when that runtime is this one, else through
+// the paired environment with that runtime id (`orca environment list`, then each one's status).
+const envRuntime = new Map(); // environment id -> runtime id
+export async function switchTo(runtimeId, handle, { call = orca } = {}) {
+  const local = await call("status").then((s) => s.runtime?.runtimeId, () => null);
+  if (!runtimeId || runtimeId === local) return call("terminal", "switch", "--terminal", handle);
+  let envId = [...envRuntime].find(([, r]) => r === runtimeId)?.[0];
+  if (!envId) {
+    const { environments = [] } = await call("environment", "list");
+    for (const e of environments) {
+      const id = e.id ?? e.name;
+      const rid = e.runtimeId ?? (await call("status", "--environment", id).then((s) => s.runtime?.runtimeId, () => null));
+      if (rid) envRuntime.set(id, rid);
+      if (rid === runtimeId) envId = id;
+    }
+  }
+  if (!envId) throw new Error(`Este Orca no está emparejado con el Orca del hub (runtime ${runtimeId}): emparéjalo en Orca > Environments`);
+  return call("terminal", "switch", "--environment", envId, "--terminal", handle);
+}
+
 export const layout = () => {
   const l = JSON.parse(fs.readFileSync(layoutFile(), "utf8"));
   return { ...l, origins: l.origins ?? [l.hub], agentsDir: expandHome(l.agentsDir) };
