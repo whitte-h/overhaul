@@ -34,6 +34,7 @@ Un solo ejecutable, `overhaul`, en el `PATH`. Sin Node instalado (excepto el hel
 | | `open [id]` | Imprime y abre `http://localhost:<port>/p/<id>`; sin id, el proyecto del cwd. |
 | | `terminal [id] [--terminal tmux\|orca]` | Abre o enfoca la terminal del orquestador del proyecto (ver Terminal); sin id, el proyecto del cwd. |
 | Instalación | `setup` | Crea `config.yaml` y `env` (con `HUB_AGENT_TOKEN`) si faltan. Nunca los reemplaza. Lo corren install.sh, `service install`, `update` y Homebrew. Antes de v0.2.1 se llamaba `init`. |
+| Diagnóstico | `doctor [--fix]`, `doctor prompt` | Revisa que la instalación funcione sola: carpeta, config, contraseña, `HUB_URL` hacia otro hub, `host` de los proyectos, servicios, hub, puente conectado a este hub y CLI de Orca. Sale con `1` si algo está mal y dice qué hacer. `--fix` comenta en `env` los `HUB_URL` que apuntan a otra máquina y reinicia los servicios. `prompt` imprime un texto para pegar en un agente de esa máquina, con la config y los nombres (nunca los valores) de `env`. `service install` lo corre al terminar. |
 | | `set-password [--no-restart]` | Contraseña de la página (`HUB_TOKEN`, o lo que diga `auth.password_env`). Lee de la terminal sin eco. |
 | | `migrate [--dry-run]` | Adopta una instalación anterior en `~/.overhaul` (ver Migración). |
 | | `paths [--json]` | Dónde está todo (claves en `contract.json` → `paths_json_keys`). |
@@ -148,7 +149,8 @@ Siempre:
 3. Deja enlaces en las rutas viejas (`~/.config/overhaul` → `~/.overhaul`, etc.): hooks, scripts y hosts que todavía usan esas rutas siguen funcionando.
 4. Quita `data_dir` de config.yaml si apuntaba a una ruta vieja (comentarios intactos, respaldo `config.yaml.bak-migrate-<fecha>`). Un `data_dir` propio (otra ruta) se respeta y no se mueve.
 5. No migra con el hub corriendo: `overhaul migrate` se niega si el puerto del hub responde (`--force` para hacerlo igual); `service install` y `update` paran los servicios antes.
-6. Si `~/.overhaul` ya tiene config y una ruta vieja también (dos instalaciones), no junta nada: avisa con cuántos proyectos tiene cada una. Excepción: si `~/.overhaul` solo tiene lo que crea `overhaul setup` (config sin proyectos y/o `env`, sin `overhaul.db` ni nada debajo), lo aparta a `backups/migrate-<stamp>/setup/` y migra la instalación vieja.
+6. Un `HUB_URL` del `env` migrado que apunta a otra máquina queda comentado (el nodo usa su propio hub).
+7. Si `~/.overhaul` ya tiene config y una ruta vieja también (dos instalaciones), no junta nada: avisa con cuántos proyectos tiene cada una. Excepción: si `~/.overhaul` solo tiene lo que crea `overhaul setup` (config sin proyectos y/o `env`, sin `overhaul.db` ni nada debajo), lo aparta a `backups/migrate-<stamp>/setup/` y migra la instalación vieja.
 
 Volver atrás a mano: parar servicios, quitar los enlaces y restaurar las carpetas de `backups/migrate-<fecha>/` (`config/`, `data/` o `home/`).
 

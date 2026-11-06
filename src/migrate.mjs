@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { resolvePaths, hasInstall, expandHomeIn } from "./paths.mjs";
+import { disableRemoteHubUrls } from "./doctor.mjs";
 
 const KINDS = ["config.yaml", "env", "overhaul.db"];
 // Not searched for hand-placed files, and not copied into the backup (big, or ours).
@@ -282,6 +283,12 @@ export function migrateHome({ env = process.env, userHome, dryRun = false, log =
     log(`${s.path} -> ${home}`);
   }
   if (plan.drop && dropDataDir(path.join(home, "config.yaml"), stamp)) log("config.yaml: quité data_dir (respaldo config.yaml.bak-migrate-*)");
+  // An earlier node reported to a hub on another machine (HUB_URL); after migrating, this one runs
+  // its own. The line stays, commented, to bring back by hand.
+  if (fs.existsSync(path.join(home, "env"))) {
+    const off = disableRemoteHubUrls(path.join(home, "env"));
+    if (off.length) log(`env: comenté ${off.join(", ")} (apuntaba a un hub de otra máquina; este nodo usa el suyo)`);
+  }
   for (const f of ["env", "config.yaml", "overhaul.db"]) {
     try {
       fs.chmodSync(path.join(home, f), 0o600);

@@ -434,6 +434,10 @@ const routes = [
       tag: cfg.messageTag,
     });
   }],
+  // For `overhaul doctor`: which bridges reported lately (ms ago) and this hub's own host name.
+  ["GET", /^\/agent\/bridge\/seen$/, "agent", async (req, res) => {
+    send(res, 200, { host: localHost(), hosts: Object.fromEntries([...bridges].map(([h, at]) => [h, Date.now() - at])) });
+  }],
   ["POST", /^\/agent\/bridge\/status$/, "agent", async (req, res) => {
     const b = await body(req);
     const windows = (Array.isArray(b.windows) ? b.windows : []).slice(0, 50).map((w) => ({

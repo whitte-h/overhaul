@@ -35,6 +35,7 @@ Proyectos (en la carpeta del proyecto):
 
 Instalación:
   setup                                crea config.yaml y env en ~/.overhaul si faltan
+  doctor [--fix] | doctor prompt       revisa la instalación; --fix arregla lo seguro; prompt: texto para un agente
   set-password [--no-restart|--check]  contraseña de la página (HUB_TOKEN); --check: ¿hay una?
   migrate [--dry-run]                  adopta ~/.config/overhaul, ~/.local/share/overhaul o work-hub
   paths [--json]                       dónde está todo
@@ -67,6 +68,7 @@ const OPTIONS = {
   json: { type: "boolean", default: false },
   file: { type: "string" },
   check: { type: "boolean", default: false },
+  fix: { type: "boolean", default: false },
   version: { type: "string" },
   force: { type: "boolean", default: false },
   help: { type: "boolean", short: "h", default: false },
@@ -140,6 +142,7 @@ const COMMANDS = {
   "install-hooks": installHooksCommand,
   migrate: migrateCommand,
   setup: setupCommand,
+  doctor: doctorCommand,
   init: initCommand,
   project: projectCommand,
   open: openCommand,
@@ -350,6 +353,30 @@ async function serviceCli([action, only]) {
   const code = await serviceCommand(action, ctx, only);
   if (code === null) fail(`Usage: ${PROG} service install|start|stop|restart|status|uninstall [hub|bridge] [--dry-run]`);
   process.exit(code);
+}
+
+async function doctorCommand([what]) {
+  if (what && what !== "prompt") fail(`Usage: ${PROG} doctor [--fix] | ${PROG} doctor prompt`);
+  const { diagnose, report, agentPrompt, disableRemoteHubUrls } = await import("./doctor.mjs");
+  const { context, statusLines } = await import("./service.mjs");
+  const serviceLines = statusLines(context({ self: selfCommand() }));
+  let result = await diagnose({ serviceLines });
+  if (opt.fix) {
+    const off = disableRemoteHubUrls(result.paths.env);
+    if (off.length) {
+      console.log(`Comenté ${off.join(", ")} en ${result.paths.env}. Reinicio los servicios.`);
+      const { serviceCommand } = await import("./service.mjs");
+      await serviceCommand("restart", context({ self: selfCommand() }));
+      result = await diagnose({ serviceLines: statusLines(context({ self: selfCommand() })), bridgeWait: 15 });
+    } else console.log("Nada que --fix pueda arreglar solo; mira los → de abajo.");
+  }
+  if (what === "prompt") {
+    console.log(agentPrompt(result, { version: VERSION }));
+    process.exit(0);
+  }
+  const ok = report(result);
+  if (!ok) console.log(`\nSi no sabes cómo seguir: ${PROG} doctor prompt, y pega lo que imprime en Claude Code (o tu agente) en esta máquina.`);
+  process.exit(ok ? 0 : 1);
 }
 
 async function helperCli([action]) {

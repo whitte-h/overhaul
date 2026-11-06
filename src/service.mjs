@@ -175,8 +175,19 @@ function removePrevious(ctx) {
   return prev;
 }
 
-// Writes and starts both services. Returns 0 or 1.
+// Writes and starts both services, then checks that they work together. Returns 0 or 1.
 export async function install(ctx) {
+  const code = await installServices(ctx);
+  if (ctx.dryRun || code !== 0) return code;
+  const { diagnose, report } = await import("./doctor.mjs");
+  ctx.log("");
+  ctx.log("Revisando que funcione (overhaul doctor):");
+  const ok = report(await diagnose({ env: ctx.env, userHome: ctx.home, serviceLines: statusLines(ctx), bridgeWait: 15 }), ctx.log);
+  if (!ok) ctx.log("\nArregla lo marcado MAL (overhaul doctor --fix hace lo seguro solo), o corre overhaul doctor prompt y pega lo que imprime en un agente de esta máquina.");
+  return code;
+}
+
+async function installServices(ctx) {
   const { migrateHome, planMigration } = await import("./migrate.mjs");
   const { setup } = await import("./init.mjs");
   const plan = planMigration({ env: ctx.env, userHome: ctx.home });
@@ -312,6 +323,13 @@ export function status(ctx) {
     all = all && state === "corriendo";
   }
   return all ? 0 : 1;
+}
+
+// What `service status` prints, as lines.
+export function statusLines(ctx) {
+  const lines = [];
+  status({ ...ctx, log: (m) => lines.push(m) });
+  return lines;
 }
 
 export async function serviceCommand(action, ctx, only) {

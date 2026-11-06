@@ -53,6 +53,8 @@ Opciones del instalador:
 - `--non-interactive`: no pregunta nada (ni contraseña ni hook).
 - `--bin-dir D` (o `OVERHAUL_BIN_DIR`): dónde dejar `overhaul`. `--binary FILE`: instala ese ejecutable en vez de bajarlo.
 
+Si algo no funciona: `overhaul doctor` dice qué está mal y qué hacer (`--fix` arregla lo seguro); `overhaul doctor prompt` imprime un texto para pegar en Claude Code o tu agente en esa máquina, con su estado y sin secretos. `service install` corre el diagnóstico al terminar.
+
 Servicios a mano: `overhaul service status|start|stop|restart|uninstall`. `overhaul service install` es idempotente: reescribe los servicios para que corran este ejecutable.
 
 Detalles:
