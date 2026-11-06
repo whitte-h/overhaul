@@ -399,6 +399,24 @@ const routes = [
       throw httpError(502, err.message);
     }
   }],
+  // The other way: the agent terminal Orca's window shows here (standalone), so the page follows
+  // what you pick in Orca. Kept a second: every open page asks.
+  ["GET", /^\/api\/orca\/focus$/, "ui", async (req, res) => {
+    if (Date.now() - orcaFocus.at > 1000) {
+      const projects = cfg.projects.filter((p) => p.terminals?.type === "orca" && p.host === localHost())
+        .map((p) => ({ ...p, session: p.orchestrator?.split(":")[0] ?? p.id }));
+      const orca = await import("./orca.mjs");
+      const hit = projects.length ? await orca.focusedAgent(projects).catch(() => null) : null;
+      const p = hit && projects.find((x) => x.id === hit.project);
+      orcaFocus.at = Date.now();
+      orcaFocus.value = hit && {
+        project: hit.project,
+        // The orchestrator's terminal is the project's chat; any other is the ticket of that key.
+        key: hit.title === orca.orcaPlan(p).orchestrator.title ? null : hit.title,
+      };
+    }
+    send(res, 200, { focus: orcaFocus.value });
+  }],
   ["GET", /^\/agent\/bridge\/pending$/, "agent", async (req, res, _m, url) => {
     const host = short(url.searchParams.get("host"));
     bridges.set(host, Date.now());
@@ -530,6 +548,7 @@ const routes = [
   }],
 ];
 
+const orcaFocus = { at: 0, value: null };
 const allowed = allowList(cfg.allowFrom);
 
 const server = http.createServer(async (req, res) => {

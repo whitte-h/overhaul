@@ -215,11 +215,48 @@ export async function currentTerminal({ exec } = {}) {
 // Project groups and folder workspaces have no CLI command; the runtime answers them on its unix
 // socket: one JSON line { id, authToken, method, params } in, one line out. Where it listens and
 // its token are in orca-runtime.json, in Orca's data folder.
+export const orcaDataDir = (env = process.env, home = os.homedir(), platform = process.platform) => env.ORCA_USER_DATA_PATH
+  ?? (platform === "darwin" ? path.join(home, "Library/Application Support/orca") : path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "orca"));
+
 export function runtimeFile(env = process.env, home = os.homedir(), platform = process.platform) {
-  if (env.ORCA_RUNTIME_FILE) return env.ORCA_RUNTIME_FILE;
-  const data = env.ORCA_USER_DATA_PATH
-    ?? (platform === "darwin" ? path.join(home, "Library/Application Support/orca") : path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "orca"));
-  return path.join(data, "orca-runtime.json");
+  return env.ORCA_RUNTIME_FILE || path.join(orcaDataDir(env, home, platform), "orca-runtime.json");
+}
+
+// --- What Orca's window shows ------------------------------------------------------------------------
+// Orca has no call for the terminal in focus. Its desktop app keeps it in the profile's state
+// (workspaceSession: activeWorktreeId, activeTabId), read here read-only, never written. A server
+// (orca serve) has no window: both are null there.
+export function profileDb(env = process.env, home = os.homedir(), platform = process.platform) {
+  const data = orcaDataDir(env, home, platform);
+  let id = "local-default";
+  try {
+    id = JSON.parse(fs.readFileSync(path.join(data, "orca-profile-index.json"), "utf8")).activeProfileId ?? id;
+  } catch {}
+  return path.join(data, "profiles", id, "profile-state.db");
+}
+
+export async function readFocus({ file = profileDb(), open } = {}) {
+  if (!open && !fs.existsSync(file)) return null;
+  let db;
+  try {
+    db = open ? open(file) : new (await import("node:sqlite")).DatabaseSync(file, { readOnly: true });
+    const row = db.prepare("select payload from profile_state_documents where domain = 'workspaceSession'").get();
+    const s = row ? JSON.parse(row.payload) : {};
+    return s.activeTabId ? { worktreeId: s.activeWorktreeId ?? null, tabId: s.activeTabId } : null;
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
+// The agent terminal in focus, among the projects' terminals: { project, title } or null.
+export async function focusedAgent(projects, { focus, exec, call } = {}) {
+  const f = focus ?? (await readFocus());
+  if (!f?.tabId) return null;
+  const wins = await listTerminals(projects, { exec, call });
+  const hit = wins.find((w) => w.paneKey.split(":")[0] === f.tabId);
+  return hit ? { project: hit.project, title: hit.name } : null;
 }
 
 export function readRuntime(file = runtimeFile()) {

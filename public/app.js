@@ -330,13 +330,33 @@ function toggleWindow(key) {
   render();
 }
 
-function selectTicket(id) {
+function selectTicket(id, { fromOrca = false } = {}) {
   selectedTicket[filter] = id;
   localSet("tickets", JSON.stringify(selectedTicket));
   render();
   window.scrollTo({ top: 0 });
-  if (followOrca) followInOrca(id);
+  if (followOrca && !fromOrca) followInOrca(id);
 }
+
+// The other way (Orca on the hub's machine): the agent you pick in Orca selects its ticket here.
+// Only a change of focus moves the page, so picking a ticket here is not undone.
+let orcaSeen = null;
+async function pollOrcaFocus() {
+  if (!followOrca || !data?.orcaHere || document.hidden) return;
+  const { focus } = await api("GET", "/api/orca/focus").catch(() => ({ focus: undefined }));
+  if (focus === undefined) return;
+  const seen = JSON.stringify(focus);
+  if (seen === orcaSeen) return;
+  const first = orcaSeen === null;
+  orcaSeen = seen;
+  if (first || !focus) return;
+  const p = data.projects.find((x) => x.id === focus.project);
+  if (!p || (filter !== "all" && filter !== p.id)) return;
+  const t = focus.key && p.tickets.find((x) => x.key.toLowerCase() === focus.key.toLowerCase());
+  const id = focus.key ? (t ? tid(p, t) : null) : CHAT;
+  if (id && selectedTicket[filter] !== id) selectTicket(id, { fromOrca: true });
+}
+setInterval(pollOrcaFocus, 1500);
 
 // Orca (on the helper's machine) holds the agents' real terminals; the helper opens or switches to them.
 let followOrca = EMBED ? true : localGet("followOrca") === "1";

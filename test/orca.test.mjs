@@ -355,3 +355,28 @@ test("focusTerminal: an open terminal as is; a missing ticket agent opened in it
   const orq = await orca.focusTerminal(p, null, { exec: o.exec, call: o.call, runTmux: noTmux });
   assert.equal(o.st.terminals.find((x) => x.handle === orq.handle).title, "orq");
 });
+
+test("readFocus and focusedAgent: the tab Orca's window shows, from its profile state (read-only)", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const data = tmpDir("orca-data-");
+  fs.writeFileSync(path.join(data, "orca-profile-index.json"), JSON.stringify({ activeProfileId: "p1" }));
+  const file = orca.profileDb({ ORCA_USER_DATA_PATH: data });
+  assert.equal(file, path.join(data, "profiles/p1/profile-state.db"));
+  assert.equal(await orca.readFocus({ file }), null); // no database yet
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec("create table profile_state_documents (domain text primary key, payload text)");
+  db.prepare("insert into profile_state_documents values ('workspaceSession', ?)").run(JSON.stringify({ activeWorktreeId: null, activeTabId: null }));
+  assert.equal(await orca.readFocus({ file }), null); // a server: no window
+  db.prepare("update profile_state_documents set payload = ? where domain = 'workspaceSession'").run(JSON.stringify({ activeWorktreeId: "folder:f1", activeTabId: "tab-9" }));
+  db.close();
+  assert.deepEqual(await orca.readFocus({ file }), { worktreeId: "folder:f1", tabId: "tab-9" });
+
+  const { exec } = fakeOrca(() => ({ terminals: [
+    { handle: "term_a", title: "orq", tabId: "tab-1", leafId: "l", writable: true },
+    { handle: "term_b", title: "nx-5", tabId: "tab-9", leafId: "l", writable: true },
+  ] }));
+  const p = { id: "focus1", session: "focus1", terminals: { type: "orca", worktree: "/w/f", repos: ["/w/f"] } };
+  assert.deepEqual(await orca.focusedAgent([p], { focus: { tabId: "tab-9" }, exec }), { project: "focus1", title: "nx-5" });
+  assert.equal(await orca.focusedAgent([p], { focus: { tabId: "tab-x" }, exec }), null);
+});

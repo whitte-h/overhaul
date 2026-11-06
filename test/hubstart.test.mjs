@@ -139,7 +139,15 @@ if (a[0] === "terminal" && a[1] === "list") ok({ terminals: [{ handle: "term_abc
 if (a[0] === "terminal" && a[1] === "switch") ok({ focus: { handle: a[3], navigated: true } });
 ok({});
 `, { mode: 0o755 });
-  const hubEnv = { ...env(home, port), ORCA_BIN: bin };
+  // Orca's window shows abc-1's tab (its profile state, as the desktop app keeps it).
+  const orcaData = path.join(home, "orca-data");
+  fs.mkdirSync(path.join(orcaData, "profiles/local-default"), { recursive: true });
+  const { DatabaseSync } = await import("node:sqlite");
+  const pdb = new DatabaseSync(path.join(orcaData, "profiles/local-default/profile-state.db"));
+  pdb.exec("create table profile_state_documents (domain text primary key, payload text)");
+  pdb.prepare("insert into profile_state_documents values ('workspaceSession', ?)").run(JSON.stringify({ activeWorktreeId: "w", activeTabId: "t" }));
+  pdb.close();
+  const hubEnv = { ...env(home, port), ORCA_BIN: bin, ORCA_USER_DATA_PATH: orcaData };
   const child = spawn(process.execPath, [path.join(root, "src/server.mjs")], { env: hubEnv, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   child.stdout.on("data", (d) => (out += d));
@@ -161,6 +169,8 @@ ok({});
     const state = await (await fetch(`${base}/api/state`, { headers: { cookie } })).json();
     assert.equal(state.orcaHere, true);
     assert.equal(state.projects[0].orcaLocal, true);
+    const focus = await (await fetch(`${base}/api/orca/focus`, { headers: { cookie } })).json();
+    assert.deepEqual(focus, { focus: { project: "alpha", key: "abc-1" } });
   } finally {
     await new Promise((r) => { child.on("exit", r); child.kill(); });
   }
