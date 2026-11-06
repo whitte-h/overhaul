@@ -402,3 +402,16 @@ test("readFocus and focusedAgent: the tab Orca's window shows, from its profile 
   assert.deepEqual(await orca.focusedAgent([p], { focus: { tabId: "tab-9" }, exec }), { project: "focus1", title: "nx-5" });
   assert.equal(await orca.focusedAgent([p], { focus: { tabId: "tab-x" }, exec }), null);
 });
+
+test("clientFocus: on a server, the paired client's tab selection that changed is the focus", () => {
+  const sel = (juggler, rosen) => ({ dev1: { "r1::/c/juggler": { activeTabId: juggler }, "r2::/c/rosenrot": { activeTabId: rosen } } });
+  let st = orca.clientFocus(sel("orq-t::l1", "ros-t::l2"));
+  assert.equal(st.focus, null); // the first read is only the baseline
+  st = orca.clientFocus(sel("jug16-t::l3", "ros-t::l2"), st);
+  assert.deepEqual(st.focus, { worktreeId: "r1::/c/juggler", tabId: "jug16-t" });
+  st = orca.clientFocus(sel("jug16-t::l3", "ros-t::l2"), st);
+  assert.deepEqual(st.focus, { worktreeId: "r1::/c/juggler", tabId: "jug16-t" }); // nothing changed: stays
+  st = orca.clientFocus(sel("jug16-t::l3", "ros2-t::l4"), st);
+  assert.deepEqual(st.focus, { worktreeId: "r2::/c/rosenrot", tabId: "ros2-t" });
+  assert.equal(orca.clientFocus(null).focus, null);
+});

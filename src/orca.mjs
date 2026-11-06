@@ -255,14 +255,41 @@ export function profileDb(env = process.env, home = os.homedir(), platform = pro
   return path.join(data, "profiles", id, "profile-state.db");
 }
 
+// A server (orca serve) has no window, so its workspaceSession has no active tab. What it does keep
+// is the tab each paired client (the desktop Orca on another computer, a phone) shows in each
+// worktree: mobileClientTabSelectionsByDeviceId[device][worktreeId].activeTabId ("tabId::leafId").
+// Which worktree that client shows is not stored, so the focus is the selection that changed since
+// the previous read; with no change it stays where it was. Returns { focus, seen } for the next call.
+export function clientFocus(selections, prev = { seen: null, focus: null }) {
+  const seen = {};
+  for (const [device, byWorktree] of Object.entries(selections ?? {})) {
+    for (const [worktreeId, sel] of Object.entries(byWorktree ?? {})) {
+      if (sel?.activeTabId) seen[`${device}\n${worktreeId}`] = sel.activeTabId;
+    }
+  }
+  let focus = prev.focus;
+  if (prev.seen) {
+    const changed = Object.keys(seen).find((k) => seen[k] !== prev.seen[k]);
+    if (changed) focus = { worktreeId: changed.split("\n")[1], tabId: seen[changed].split("::")[0] };
+  }
+  return { focus, seen };
+}
+
+let clientSeen = { seen: null, focus: null };
+
 export async function readFocus({ file = profileDb(), open } = {}) {
   if (!open && !fs.existsSync(file)) return null;
   let db;
   try {
     db = open ? open(file) : new (await import("node:sqlite")).DatabaseSync(file, { readOnly: true });
-    const row = db.prepare("select payload from profile_state_documents where domain = 'workspaceSession'").get();
-    const s = row ? JSON.parse(row.payload) : {};
-    return s.activeTabId ? { worktreeId: s.activeWorktreeId ?? null, tabId: s.activeTabId } : null;
+    const doc = (domain) => {
+      const row = db.prepare("select payload from profile_state_documents where domain = ?").get(domain);
+      return row ? JSON.parse(row.payload) : null;
+    };
+    const s = doc("workspaceSession") ?? {};
+    if (s.activeTabId) return { worktreeId: s.activeWorktreeId ?? null, tabId: s.activeTabId };
+    clientSeen = clientFocus(doc("mobileClientTabSelectionsByDeviceId"), clientSeen);
+    return clientSeen.focus;
   } catch {
     return null;
   } finally {
