@@ -417,9 +417,17 @@ function followInOrca(id) {
   const p = data.projects.find((x) => x.id === filter) ?? data.projects.find((x) => id.startsWith(`${x.id}/`));
   if (!p) return;
   const t = id === CHAT ? null : p.tickets.find((x) => tid(p, x) === id);
-  if (p.terminal === "orca") return focusInOrca(p, t?.key ?? null, true);
+  // A ticket without its agent is not started by picking it: its "Agente" box has "Abrir agente".
+  if (p.terminal === "orca") return t && !t.window ? undefined : focusInOrca(p, t?.key ?? null, true);
   const w = id === CHAT ? orchestratorWindow(p) : ticketWindows(p, t ?? { key: "" })[0];
   if (w) openInOrca(p, w, true);
+}
+
+// Orca projects start a ticket's agent only on demand: picking the ticket shows this button.
+const canOpenAgent = (p, t) => p.terminal === "orca" && (p.orcaLocal || helperUp) && !!t?.key;
+async function openAgent(p, t) {
+  if (await focusInOrca(p, t.key)) toast(`Agente de ${t.key} abierto en Orca`);
+  load();
 }
 
 const orcaButton = (p, w) => (helperUp || p.orcaLocal) && h("button", { title: "Terminal real en Orca (necesita el helper de Overhaul)", onclick: () => openInOrca(p, w) }, "Abrir en Orca");
@@ -850,9 +858,11 @@ function card(p, t) {
         ),
         p.autoWork.enabled && t.autoBlocker && !p.autoWork.blocker && h("div", { class: "meta" }, `auto_work: ${t.autoBlocker}`),
       ),
-      (t.window || p.autoWork.enabled && !t.autoBlocker && t.auto?.status !== "running") && sideSection("Agente",
+      (t.window || canOpenAgent(p, t) || p.autoWork.enabled && !t.autoBlocker && t.auto?.status !== "running") && sideSection("Agente",
         t.window && h("div", { class: "meta" }, `${t.window.name} · ${p.host}`),
+        !t.window && canOpenAgent(p, t) && h("div", { class: "meta" }, "Este ticket no tiene agente abierto."),
         h("div", { class: "actions" },
+          !t.window && canOpenAgent(p, t) && h("button", { onclick: () => openAgent(p, t) }, "Abrir agente"),
           t.window && orcaButton(p, t.window),
           t.window && restartButton(t.window),
           t.window && closeButton(t.window),
