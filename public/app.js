@@ -825,13 +825,12 @@ function card(p, t) {
     ),
     [
       t.window && permissionBox(t.window),
-      EMBED ? null : t.window
-        ? terminalView(t.window)
-        : h("div", { class: "no-agent" },
-            h("div", {}, "Sin agente corriendo para este ticket."),
-            h("div", { class: "meta" }, p.autoWork.enabled && !t.autoBlocker ? "Lánzalo desde el panel de la derecha, o escríbele: el mensaje queda en cola." : "Si le escribes, el mensaje queda en cola hasta que haya un agente."),
-          ),
-      composer(p, t, "message", "Instrucción para el agente", "Enviar al agente"),
+      // The agent lives in its real terminal (tmux or Orca): no copy of it here.
+      !EMBED && !t.window && h("div", { class: "no-agent" },
+        h("div", {}, "Sin agente corriendo para este ticket."),
+        p.autoWork.enabled && !t.autoBlocker && h("div", { class: "meta" }, "Lánzalo desde el panel de la derecha."),
+      ),
+      agentComposer(p, t),
       flashes.has(id) && h("div", { class: "flash" }, flashes.get(id)),
     ],
     [
@@ -869,6 +868,21 @@ function card(p, t) {
       ),
     ],
   );
+}
+
+// Writing to the agent from the page: only when its terminal is not at hand (a phone, another
+// computer: no /p/ inside Orca, no helper, no Orca on the hub's machine), folded until asked for.
+// Queued until the agent exists.
+function agentComposer(p, t) {
+  if (EMBED || helperUp || p.orcaLocal) return null;
+  const id = `write:${tid(p, t)}`;
+  return h("details", {
+    class: "write-agent",
+    open: openDetails.has(id),
+    ontoggle: (e) => (e.target.open ? openDetails.add(id) : openDetails.delete(id)),
+  }, h("summary", {}, "Escribir al agente"),
+  h("div", { class: "meta" }, t.window ? "Le llega a su terminal." : "Queda en cola hasta que haya un agente."),
+  composer(p, t, "message", "Instrucción para el agente", "Enviar al agente"));
 }
 
 // Side panel: one titled section per entry.
