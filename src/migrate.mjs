@@ -138,6 +138,27 @@ function rmEmptyUp(dir, stop) {
   }
 }
 
+// What overhaul setup writes; nothing else may be in home's root for it to count as blank.
+const BLANK_FILES = ["config.yaml", "env"];
+
+// Projects in a config.yaml (0 when it is missing or unreadable).
+function projectCount(file) {
+  try {
+    const raw = YAML.parse(fs.readFileSync(file, "utf8")) ?? {};
+    return Object.keys(raw.projects ?? {}).length;
+  } catch {
+    return 0;
+  }
+}
+
+// Home holds only what setup creates: config.yaml without projects and/or env, no database and
+// nothing found below it.
+function blankHome(home, nested) {
+  if (fs.existsSync(path.join(home, "overhaul.db")) || fs.existsSync(path.join(home, "config.json"))) return false;
+  if (Object.values(nested).some((dirs) => dirs.length)) return false;
+  return projectCount(path.join(home, "config.yaml")) === 0;
+}
+
 // What migrate would do: { status, steps: [text], ... } without touching anything.
 // status: "nothing" | "migrate" | "ambiguous" | "conflict"
 export function planMigration({ env = process.env, userHome } = {}) {
@@ -167,11 +188,20 @@ export function planMigration({ env = process.env, userHome } = {}) {
   // 2. An earlier layout outside home (explicit config dirs are left alone: they are what the
   // caller asked for).
   const sources = [];
+  const aside = [];
   if (!env.HUB_CONFIG_DIR && !env.OVERHAUL_CONFIG_DIR) {
     const cfgDir = P.legacy.config.find((d) => hasInstall(d) && !inside(real(d) ?? d, homeReal ?? home));
     const homeHasInstall = hasInstall(home) || [...normalize].length > 0;
     if (cfgDir && homeHasInstall) {
-      return { status: "conflict", home, notes: [`Hay dos instalaciones: ${home} y ${cfgDir}. No junto nada; quita o mueve una y vuelve a correr overhaul migrate.`] };
+      // A home that only holds what setup writes (no projects, no database) is not an
+      // installation: it is set aside, with a backup, and the earlier one moves in.
+      if (blankHome(home, nested)) {
+        aside.push(...BLANK_FILES.filter((f) => fs.existsSync(path.join(home, f))));
+        notes.push(`${home} solo tiene lo que crea overhaul setup (sin proyectos ni base de datos): lo aparto al respaldo y migro ${cfgDir}`);
+      } else {
+        const has = (d) => `${d} (${projectCount(path.join(d, "config.yaml"))} proyectos)`;
+        return { status: "conflict", home, notes: [`Hay dos instalaciones: ${has(home)} y ${has(cfgDir)}. No junto nada; quita o mueve la que no uses y vuelve a correr overhaul migrate.`] };
+      }
     }
     if (cfgDir) {
       sources.push({ kind: "config", path: cfgDir, real: real(cfgDir) });
@@ -198,6 +228,7 @@ export function planMigration({ env = process.env, userHome } = {}) {
   }
 
   const steps = [];
+  for (const f of aside) steps.push(`apartar ${path.join(home, f)} (lo creó overhaul setup) al respaldo`);
   for (const d of normalizeDirs) steps.push(`subir ${path.relative(home, d)}/ a la raíz de ${home}`);
   for (const s of sources.filter((x) => !x.already)) steps.push(`mover ${s.path}${s.real !== s.path ? ` (${s.real})` : ""} a ${home} y dejar un enlace`);
   const cfgSource = sources.find((x) => x.kind === "config");
@@ -206,7 +237,7 @@ export function planMigration({ env = process.env, userHome } = {}) {
   const dataDirInHome = configDataDir(cfgFile, expand);
   const drop = sources.some((s) => s.dataDirKey) || (dataDirInHome && normalizeDirs.some((d) => inside(dataDirInHome, d) || dataDirInHome === d));
   if (drop) steps.push("quitar data_dir de config.yaml (los datos quedan en la carpeta de Overhaul)");
-  return { status: steps.length ? "migrate" : "nothing", home, steps, notes, normalizeDirs, sources, drop, mode: P.mode, configFile: cfgFile };
+  return { status: steps.length ? "migrate" : "nothing", home, steps, notes, normalizeDirs, sources, aside, drop, mode: P.mode, configFile: cfgFile };
 }
 
 // Runs the plan. Returns the plan plus { backup } (null when there was nothing to do).
@@ -225,6 +256,14 @@ export function migrateHome({ env = process.env, userHome, dryRun = false, log =
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   fs.chmodSync(home, 0o700);
 
+  // What setup alone wrote in home goes to the backup first, so the earlier installation's files
+  // take its place instead of losing to it.
+  for (const f of plan.aside ?? []) {
+    const keep = path.join(backup, "setup", f);
+    fs.mkdirSync(path.dirname(keep), { recursive: true });
+    move(path.join(home, f), keep);
+    log(`${path.join(home, f)} -> ${keep}`);
+  }
   // Copies first, all of them, before anything moves.
   if (plan.normalizeDirs.length) backupCopy(home, path.join(backup, "home"), true);
   for (const s of plan.sources.filter((x) => !x.already)) backupCopy(s.real, path.join(backup, s.kind));

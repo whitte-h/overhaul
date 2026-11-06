@@ -214,11 +214,31 @@ test("migrate refuses to guess: two config.yaml inside ~/.overhaul, or two insta
   assert.deepEqual(tree(oh), before);
 
   const { home: h2 } = v01Home();
-  write(path.join(h2, ".overhaul/config.yaml"), "port: 1\n");
+  write(path.join(h2, ".overhaul/config.yaml"), "port: 1\nprojects:\n  mine: { repo: ~/x }\n");
   const r2 = overhaul(["migrate"], { env: cleanEnv(h2) });
   assert.equal(r2.status, 1);
-  assert.match(r2.stdout + r2.stderr, /Hay dos instalaciones/);
+  assert.match(r2.stdout + r2.stderr, /Hay dos instalaciones: \S+\.overhaul \(1 proyectos\) y \S+\.config\/overhaul \(0 proyectos\)/);
   assert.ok(fs.lstatSync(path.join(h2, ".config/overhaul")).isDirectory());
+});
+
+test("migrate: a ~/.overhaul with only what setup writes does not block the earlier installation", () => {
+  const home = tmp("overhaul-blank-");
+  const cfg = path.join(home, ".config/work-hub");
+  const mine = "# mine\nversion: 2\nport: 1\nprojects:\n  nexus: { repo: ~/code/nexus }\n";
+  write(path.join(cfg, "config.yaml"), mine, 0o600);
+  write(path.join(cfg, "env"), "HUB_TOKEN=a-long-ui-password\nNEXUS_TOKEN=t\n", 0o600);
+  const oh = path.join(home, ".overhaul");
+  const env = cleanEnv(home);
+  assert.equal(overhaul(["setup"], { env: { ...env, OVERHAUL_HOME: oh } }).status, 0);
+  const blank = read(path.join(oh, "config.yaml"));
+  const r = overhaul(["migrate"], { env });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(read(path.join(oh, "config.yaml")), mine);
+  assert.match(read(path.join(oh, "env")), /NEXUS_TOKEN=t/);
+  assert.equal(fs.readlinkSync(cfg), oh);
+  const [backup] = fs.readdirSync(path.join(oh, "backups"));
+  assert.equal(read(path.join(oh, "backups", backup, "setup/config.yaml")), blank);
+  assert.ok(fs.existsSync(path.join(oh, "backups", backup, "setup/env")));
 });
 
 test("migrate: data_dir pointing elsewhere is respected and not moved", () => {
