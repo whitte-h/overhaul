@@ -214,6 +214,7 @@ const jiraApi = (j) => `${j.baseUrl}/rest/api/${j.cloud ? 3 : 2}`;
 
 export const jira = {
   myself: (f, j) => http(f, `${jiraApi(j)}/myself`, { authorization: jiraAuth(j) }, "Jira"),
+  filterJql: async (f, j, id) => (await http(f, `${jiraApi(j)}/filter/${id}`, { authorization: jiraAuth(j) }, "Jira")).jql,
   async projects(f, j) {
     if (!j.cloud) return (await http(f, `${jiraApi(j)}/project`, { authorization: jiraAuth(j) }, "Jira")).map((p) => ({ key: p.key, name: p.name }));
     const out = [];
@@ -236,6 +237,26 @@ export const jira = {
 
 export const jiraCloud = (url) => /\.(atlassian\.net|jira\.com)$/i.test(new URL(url).hostname);
 export const projectJql = (key) => (key ? `project = ${/^[A-Z][A-Z0-9_]*$/.test(key) ? key : JSON.stringify(key)} AND ${DEFAULT_JQL}` : DEFAULT_JQL);
+// Any Jira URL the user has open: the site, a search (?jql=), a saved filter (?filter=10010), a
+// board or a ticket. Gives the base URL (with a Server context path such as /jira) and what it says
+// about the tickets: { baseUrl, jql, filterId, projectKey }.
+// Jira Cloud has no context path (its pages live under /jira/...); Server may have one (/jira).
+const JIRA_MARKS = /\/(browse|issues|projects|secure|plugins|rest|login\.jsp|servicedesk|dashboards?)(\/|$)/;
+export function jiraFromUrl(input) {
+  const raw = cleanUrl(input);
+  let u;
+  try { u = new URL(raw); } catch { return { baseUrl: raw, jql: null, filterId: null, projectKey: null }; }
+  const m = u.pathname.match(JIRA_MARKS);
+  const context = jiraCloud(u.origin) ? "" : (m ? u.pathname.slice(0, m.index) : u.pathname).replace(/\/+$/, "");
+  const q = u.searchParams;
+  const jql = q.get("jql")?.trim() || null;
+  const filterId = /^\d+$/.test(q.get("filter") ?? "") ? q.get("filter") : null;
+  const key = u.pathname.match(/\/browse\/([A-Z][A-Z0-9_]*)-\d+/)?.[1]
+    ?? u.pathname.match(/\/projects\/([A-Z][A-Z0-9_]*)(\/|$)/)?.[1]
+    ?? q.get("projectKey") ?? null;
+  return { baseUrl: `${u.origin}${context}`, jql, filterId, projectKey: key };
+}
+
 const jqlProject = (jql) => jql?.match(/project\s*=\s*"?([A-Za-z][\w]*)"?/)?.[1] ?? null;
 
 export const kaneo = {
@@ -493,7 +514,9 @@ async function jiraStep({ io, ni, flags, old, PFX, env, savedEnv, pending, fetch
   let jql = flags.jql ?? old.jql ?? null;
   if (ni) {
     if (!baseUrl) throw new WizardError("Falta --base-url (https://tuempresa.atlassian.net)", 2);
-    baseUrl = cleanUrl(baseUrl);
+    const fromUrl = jiraFromUrl(baseUrl);
+    baseUrl = fromUrl.baseUrl;
+    jql ??= fromUrl.jql ?? (fromUrl.projectKey ? projectJql(fromUrl.projectKey) : null);
     const cloud = !!(flags["email-env"] || old.email_env) || jiraCloud(baseUrl);
     const j = { baseUrl, cloud, email: env[emailEnv] ?? savedEnv[emailEnv], token: env[tokenEnv] ?? savedEnv[tokenEnv] };
     if (env[tokenEnv]) pending[tokenEnv] = env[tokenEnv];
@@ -502,6 +525,7 @@ async function jiraStep({ io, ni, flags, old, PFX, env, savedEnv, pending, fetch
       if (!j.token || (cloud && !j.email)) throw new WizardError(`Para validar necesito ${cloud ? `${emailEnv} y ` : ""}${tokenEnv} en el entorno o en env (o --no-validate)`, 2);
       const me = await jira.myself(fetchFn, j);
       io.say(`Jira: conectado como ${me.displayName ?? me.emailAddress ?? me.name ?? "?"}`);
+      if (!jql && fromUrl.filterId) jql = await jira.filterJql(fetchFn, j, fromUrl.filterId);
       if (jql) await jira.count(fetchFn, j, jql);
     }
     return { type: "jira", base_url: baseUrl, ...(cloud ? { email_env: emailEnv } : {}), token_env: tokenEnv, jql: jql ?? DEFAULT_JQL };
@@ -510,7 +534,8 @@ async function jiraStep({ io, ni, flags, old, PFX, env, savedEnv, pending, fetch
   io.say("");
   io.say("3. Credenciales de Jira (se guardan en env, nunca en config.yaml).");
   for (;;) {
-    baseUrl = cleanUrl(await askUrl(io, "URL de Jira (p. ej. https://tuempresa.atlassian.net)", baseUrl));
+    const fromUrl = jiraFromUrl(await askUrl(io, "URL de Jira: pega la de tu lista de tickets (búsqueda, filtro o board) o la del sitio", baseUrl));
+    baseUrl = fromUrl.baseUrl;
     const cloud = jiraCloud(baseUrl) || (await io.yes("Ese host no es atlassian.net. ¿Es Jira Cloud igual? (no: Jira Server/Data Center, con token personal)", !!old.email_env));
     const j = { baseUrl, cloud };
     if (cloud) {
@@ -528,6 +553,14 @@ async function jiraStep({ io, ni, flags, old, PFX, env, savedEnv, pending, fetch
       const projects = await jira.projects(fetchFn, j);
       if (cloud) pending[emailEnv] = j.email;
       pending[tokenEnv] = j.token;
+      // The URL already says which tickets: its JQL, its saved filter or its project.
+      const given = fromUrl.jql ?? (fromUrl.filterId ? await jira.filterJql(fetchFn, j, fromUrl.filterId) : null) ?? (fromUrl.projectKey ? projectJql(fromUrl.projectKey) : null);
+      if (given) {
+        const n = await jira.count(fetchFn, j, given);
+        io.say(`Tus tickets: ${given}`);
+        io.say(`Trae ${n === 50 ? "50 o más" : n} ticket(s) abiertos.`);
+        return { type: "jira", base_url: baseUrl, ...(cloud ? { email_env: emailEnv } : {}), token_env: tokenEnv, jql: given };
+      }
       let key = jqlProject(jql);
       if (projects.length) {
         io.say(`Proyectos de Jira que ves (${projects.length}):`);
@@ -535,9 +568,10 @@ async function jiraStep({ io, ni, flags, old, PFX, env, savedEnv, pending, fetch
           ...projects.map((p) => ({ value: p.key, label: `${p.key} — ${p.name}` })),
         ].concat([{ value: "*", label: "todos los proyectos" }]), key && projects.some((p) => p.key === key) ? key : projects.length === 1 ? projects[0].key : "");
       } else io.say("No ves ningún proyecto con esa cuenta; el JQL queda sin filtro de proyecto.");
-      const proposed = key === "*" || !key ? DEFAULT_JQL : old.jql && jqlProject(old.jql) === key ? old.jql : projectJql(key);
-      for (;;) {
-        jql = await io.ask("JQL de tus tickets (asignados a ti, sin terminar)", proposed);
+      jql = key === "*" || !key ? DEFAULT_JQL : old.jql && jqlProject(old.jql) === key ? old.jql : projectJql(key);
+      // Built from the project: only asked for when Jira rejects it.
+      for (let first = true; ; first = false) {
+        if (!first) jql = await io.ask("JQL de tus tickets (asignados a ti, sin terminar)", jql);
         try {
           const n = await jira.count(fetchFn, j, jql);
           io.say(`Ese JQL trae ${n === 50 ? "50 o más" : n} ticket(s) abiertos.`);

@@ -11,7 +11,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import { normalize } from "../src/config.mjs";
-import { findRepos, prompter, proposeRepo, runInit, writeProject, listProjects, removeProject } from "../src/wizard.mjs";
+import { findRepos, jiraFromUrl, prompter, proposeRepo, runInit, writeProject, listProjects, removeProject } from "../src/wizard.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tmp = (p) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p)));
@@ -65,6 +65,7 @@ async function fakeJira({ email = "me@example.com", token = "jira-secret-token" 
     if (req.headers.authorization !== auth) return json(401, { errorMessages: ["Unauthorized"] });
     if (url.pathname === "/rest/api/3/myself") return json(200, { displayName: "Me Myself", emailAddress: email });
     if (url.pathname === "/rest/api/3/project/search") return json(200, { values: [{ key: "ACME", name: "Acme Shop" }, { key: "OPS", name: "Operations" }], isLast: true });
+    if (url.pathname === "/rest/api/3/filter/10010") return json(200, { id: "10010", jql: "project = OPS AND assignee = currentUser()" });
     if (url.pathname === "/rest/api/3/search/jql") {
       if (/nonsense/.test(url.searchParams.get("jql"))) return json(400, { errorMessages: ["Error in the JQL Query"] });
       return json(200, { issues: [{ key: "ACME-1" }, { key: "ACME-2" }] });
@@ -117,8 +118,7 @@ test("init, Jira Cloud with two repos: validates the token, lists projects, buil
       "Acme", "", // name, id (acme)
       jira.url, "s", // URL; not atlassian.net, but Cloud
       "me@example.com", "jira-secret-token",
-      "1", // ACME
-      "", // the proposed JQL
+      "1", // ACME (its JQL is built, not asked)
       "", // repos: all
       "", "", // api: backend, its package.json description
       "", "Tienda web", // web: frontend, own description
@@ -161,7 +161,7 @@ test("init, Jira Cloud with two repos: validates the token, lists projects, buil
   } finally { jira.close(); }
 });
 
-test("init: a bad token asks again; a rejected JQL is asked again", async () => {
+test("init: a bad token asks again; the chosen project gives the JQL without asking", async () => {
   const m = machine();
   const parent = twoRepos(m.home);
   const jira = await fakeJira();
@@ -171,16 +171,47 @@ test("init: a bad token asks again; a rejected JQL is asked again", async () => 
       jira.url, "s", "me@example.com", "wrong-token",
       "s", // try again
       jira.url, "s", "me@example.com", "jira-secret-token",
-      "OPS", "project = OPS AND nonsense", "project = OPS",
+      "OPS",
       "1", "", "", "", "", "", "", "", "", "",
     ]);
     assert.equal(code, 0, out);
     assert.match(out, /No pude validar: Jira: 401/);
-    assert.match(out, /Jira no aceptó el JQL/);
+    assert.doesNotMatch(out, /JQL de tus tickets/);
     const p = project(m, "acme");
-    assert.equal(p.tracker.jql, "project = OPS");
+    assert.equal(p.tracker.jql, "project = OPS AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC");
     assert.deepEqual(p.repos.map((r) => r.path), ["~/code/acme/api"]);
   } finally { jira.close(); }
+});
+
+test("init: the URL of your ticket list gives site and JQL; a saved filter's JQL is read from Jira", async () => {
+  for (const [suffix, jql] of [
+    [`/issues/?jql=${encodeURIComponent("assignee = currentUser() AND resolution = Unresolved")}`, "assignee = currentUser() AND resolution = Unresolved"],
+    ["/issues/?filter=10010", "project = OPS AND assignee = currentUser()"],
+  ]) {
+    const m = machine();
+    const parent = twoRepos(m.home);
+    const jira = await fakeJira();
+    try {
+      const { code, out } = await wizard(m, parent, [
+        "jira", "Acme", "acme",
+        `${jira.url}${suffix}`, "s", "me@example.com", "jira-secret-token",
+        "1", "", "", "", "", "", "", "", "", "",
+      ]);
+      assert.equal(code, 0, out);
+      assert.doesNotMatch(out, /JQL de tus tickets|¿Cuál es el de este proyecto/);
+      const p = project(m, "acme");
+      assert.equal(p.tracker.base_url, jira.url);
+      assert.equal(p.tracker.jql, jql);
+    } finally { jira.close(); }
+  }
+});
+
+test("jiraFromUrl: site, Server context path, search, filter, board and ticket", () => {
+  assert.deepEqual(jiraFromUrl("acme.atlassian.net/"), { baseUrl: "https://acme.atlassian.net", jql: null, filterId: null, projectKey: null });
+  assert.deepEqual(jiraFromUrl("https://jira.acme.com/jira/issues/?jql=project%20%3D%20X"), { baseUrl: "https://jira.acme.com/jira", jql: "project = X", filterId: null, projectKey: null });
+  assert.equal(jiraFromUrl("https://acme.atlassian.net/issues/?filter=10010").filterId, "10010");
+  assert.equal(jiraFromUrl("https://acme.atlassian.net/jira/software/projects/ACME/boards/3").projectKey, "ACME");
+  assert.deepEqual(jiraFromUrl("https://jira.acme.com/browse/OPS-12"), { baseUrl: "https://jira.acme.com", jql: null, filterId: null, projectKey: "OPS" });
 });
 
 test("init: giving up on credentials changes nothing", async () => {
@@ -212,7 +243,7 @@ test("init in the same folder again offers to edit it, never a second project; E
     assert.equal(fs.readFileSync(m.config, "utf8"), before);
 
     // Edit: everything by Enter (token kept), except web's role.
-    const edit = await wizard(m, parent, ["s", "", "", "", "", "", "", "", "", "", "", "", "ui", "", "", "", "", "", "", ""]);
+    const edit = await wizard(m, parent, ["s", "", "", "", "", "", "", "", "", "", "", "ui", "", "", "", "", "", "", ""]);
     assert.equal(edit.code, 0, edit.out);
     assert.match(edit.out, /\[guardado; Enter lo mantiene\]/);
     const text = fs.readFileSync(m.config, "utf8");
